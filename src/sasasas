@@ -1,0 +1,284 @@
+/**
+ * @file main.cpp
+ * @brief ESP32 Access Point Web Server with Pure HTML, ST7735, Serial output,
+ * dynamic navigation, and small font TFT question rendering.
+ */
+#include <Fonts/FreeSans9pt7b.h> // Include standard Adafruit GFX 9pt font (~10px height)
+#include <Arduino.h>
+#include <WiFi.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <DNSServer.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_ST7735.h>
+#include <SPI.h>
+#include <vector>
+#include <algorithm>
+
+// ACCESS POINT CONFIG
+const char *AP_SSID = "ReviewQuest: ESP32";
+const char *AP_PASSWORD = "12345678";
+const byte DNS_PORT = 53;
+
+// ST7735 DISPLAY PINS
+#define TFT_CS   5
+#define TFT_DC   2
+#define TFT_RST  4
+
+Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
+
+// DATA STRUCTURES
+struct Question {
+    int id;
+    String text;
+    String optionA;
+    String optionB;
+    String optionC;
+    String optionD;
+    char initialCharAns;
+};
+
+// Temporary RAM storage
+std::vector<Question> questionList;
+int nextQuestionId = 1;
+
+AsyncWebServer server(80);
+DNSServer dnsServer;
+
+/**
+ * Output full database directly to Serial Monitor.
+ */
+void printToSerial() {
+    // Serial.println("\n-------------------------------------------");
+    // Serial.printf("[SERIAL DATABASE DUMP] Total Saved: %d\n", questionList.size());
+    for (const auto &q : questionList) {
+        // Serial.printf("\n#%d: %s\n", q.id, q.text.c_str());
+        // Serial.printf("   A) %s %s\n", q.optionA.c_str(), q.initialCharAns == 'A' ? "[CORRECT]" : "");
+        // Serial.printf("   B) %s %s\n", q.optionB.c_str(), q.initialCharAns == 'B' ? "[CORRECT]" : "");
+        // Serial.printf("   C) %s %s\n", q.optionC.c_str(), q.initialCharAns == 'C' ? "[CORRECT]" : "");
+        // Serial.printf("   D) %s %s\n", q.optionD.c_str(), q.initialCharAns == 'D' ? "[CORRECT]" : "");
+    }
+    // Serial.println("-------------------------------------------\n");
+}
+
+/**
+ * Renders all questions directly onto the ST7735 screen using small font (size 1).
+ */
+void updateTFTDisplay() {
+    tft.fillScreen(ST77XX_BLACK);
+    tft.setFont(&FreeSans9pt7b); // Switches to ~10px custom font
+    tft.setTextSize(1);
+    
+    // Advance Y cursor past header
+    tft.setCursor(0, 14);
+
+    if (questionList.empty()) {
+        tft.setTextColor(ST77XX_YELLOW);
+        tft.println("No questions stored.");
+        tft.setFont(); // Reset to default font before returning
+        return;
+    }
+
+    for (const auto &q : questionList) {
+        // Stop rendering if cursor exceeds vertical screen boundaries (line height ~14px)
+        if (tft.getCursorY() > tft.height() - 14) {
+            tft.setTextColor(ST77XX_MAGENTA);
+            tft.println("...more");
+            break;
+        }
+
+        tft.setTextColor(ST77XX_CYAN);
+        tft.printf("#%d: ", q.id);
+        
+        tft.setTextColor(ST77XX_WHITE);
+        tft.println(q.text);
+    }
+
+    // Reset font to default so other drawing operations are not affected
+    tft.setFont();
+}
+/**
+ * Common HTML Head, CSS, and navigation component
+ */
+String getCommonHeader(const String &title, bool isManagePage) {
+    String html = "<!DOCTYPE html><html><head>";
+    html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
+    html += "<title>" + title + "</title>";
+    html += "<style>";
+    html += "body { font-family: system-ui, sans-serif; background: #121212; color: #e0e0e0; margin: 0; padding: 20px; }";
+    html += ".container { max-width: 600px; margin: auto; }";
+    html += ".nav { display: flex; gap: 8px; margin-bottom: 20px; }";
+    html += ".nav a { font-size: 0.85em; padding: 6px 10px; color: #80bfff; text-decoration: none; font-weight: bold; background: #1e1e1e; border-radius: 6px; }";
+    html += ".nav a.active { background: #007bff; color: #fff; }";
+    html += ".card { background: #1e1e1e; padding: 20px; border-radius: 12px; margin-bottom: 20px; }";
+    html += "h2 { margin-top: 0; color: #fff; }";
+    html += "label { font-size: 0.9em; color: #aaa; }";
+    html += "input[type='text'], select { width: 100%; padding: 10px; margin: 6px 0 16px 0; border-radius: 6px; border: 1px solid #333; background: #2a2a2a; color: #fff; box-sizing: border-box; }";
+    html += ".grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }";
+    html += "button { width: 100%; background: #007bff; color: white; border: none; padding: 12px; border-radius: 6px; font-weight: bold; cursor: pointer; }";
+    html += ".btn-danger { background: #dc3545; width: auto; padding: 8px 16px; margin-top: 10px; }";
+    html += ".q-card { background: #2a2a2a; padding: 15px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid #dc3545; }";
+    html += ".options-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }";
+    html += ".opt { background: #1e1e1e; padding: 8px; border-radius: 4px; font-size: 0.9em; }";
+    html += ".opt.correct { border: 1px solid #28a745; background: #14331a; color: #85e89d; font-weight: bold; }";
+    html += "</style></head><body><div class='container'>";
+    
+    // NAVIGATION BAR
+    html += "<div class='nav'>";
+    html += "<a href='/' class='" + String(!isManagePage ? "active" : "") + "'>Add Question</a>";
+    html += "<a href='/manage' class='" + String(isManagePage ? "active" : "") + "'>Manage (" + String(questionList.size()) + ")</a>";
+    html += "</div>";
+    
+    return html;
+}
+
+/**
+ * Route 1: Home Page HTML (Form Only)
+ */
+String buildFullPageHTML() {
+    String html = getCommonHeader("ESP32 Quiz Manager", false);
+    
+    html += "<div class='card'>";
+    html += "<h2>Add New Question</h2>";
+    html += "<form method='POST' action='/add-question'>";
+    html += "<label>Question Prompt</label>";
+    html += "<input type='text' name='question' placeholder='e.g., What is 2 + 2?' required>";
+    html += "<div class='grid'>";
+    html += "<div><label>Option A</label><input type='text' name='optA' required></div>";
+    html += "<div><label>Option B</label><input type='text' name='optB' required></div>";
+    html += "<div><label>Option C</label><input type='text' name='optC' required></div>";
+    html += "<div><label>Option D</label><input type='text' name='optD' required></div>";
+    html += "</div>";
+    html += "<label>Correct Answer</label>";
+    html += "<select name='correctOpt' required>";
+    html += "<option value='A'>Option A</option>";
+    html += "<option value='B'>Option B</option>";
+    html += "<option value='C'>Option C</option>";
+    html += "<option value='D'>Option D</option>";
+    html += "</select>";
+    html += "<button type='submit'>Save Question</button>";
+    html += "</form></div>";
+    html += "</div></body></html>";
+    return html;
+}
+
+/**
+ * Route 2: Manage/Delete Page HTML
+ */
+String buildManagePageHTML() {
+    String html = getCommonHeader("Manage Questions", true);
+
+    html += "<div class='card'><h2>Manage Questions</h2>";
+    if (questionList.empty()) {
+        html += "<p style='color: #888;'>No questions available to delete.</p>";
+    } else {
+        for (const auto &q : questionList) {
+            html += "<div class='q-card'>";
+            html += "<h3>#" + String(q.id) + ": " + q.text + "</h3>";
+            html += "<div class='options-grid'>";
+            html += "<div class='opt " + String(q.initialCharAns == 'A' ? "correct" : "") + "'>A) " + q.optionA + "</div>";
+            html += "<div class='opt " + String(q.initialCharAns == 'B' ? "correct" : "") + "'>B) " + q.optionB + "</div>";
+            html += "<div class='opt " + String(q.initialCharAns == 'C' ? "correct" : "") + "'>C) " + q.optionC + "</div>";
+            html += "<div class='opt " + String(q.initialCharAns == 'D' ? "correct" : "") + "'>D) " + q.optionD + "</div>";
+            html += "</div>";
+            html += "<form method='POST' action='/delete-question'>";
+            html += "<input type='hidden' name='id' value='" + String(q.id) + "'>";
+            html += "<button type='submit' class='btn-danger'>Delete Question</button>";
+            html += "</form>";
+            html += "</div>";
+        }
+    }
+    html += "</div></div></body></html>";
+    return html;
+}
+
+void setup() {
+    Serial.begin(115200);
+    delay(1000);
+    Serial.flush();
+
+    // Serial.println("\n>>> SYSTEM BOOTING <<<");
+
+    // INIT TFT DISPLAY
+    tft.initR(INITR_GREENTAB);
+    tft.setRotation(1);
+    updateTFTDisplay();
+
+    // INIT ACCESS POINT
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(AP_SSID, AP_PASSWORD);
+    IPAddress apIP = WiFi.softAPIP();
+
+    dnsServer.start(DNS_PORT, "*", apIP);
+
+    // Serial.println("=================================");
+    // Serial.print("AP SSID: "); // Serial.println(AP_SSID);
+    // Serial.print("AP IP:   "); // Serial.println(apIP);
+    // Serial.println("=================================");
+
+    // ROUTE: INDEX PAGE
+    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/html", buildFullPageHTML());
+    });
+
+    // ROUTE: DEDICATED MANAGE PAGE
+    server.on("/manage", HTTP_GET, [](AsyncWebServerRequest *request) {
+        request->send(200, "text/html", buildManagePageHTML());
+    });
+
+    // ROUTE: POST HANDLER TO ADD QUESTION
+    server.on("/add-question", HTTP_POST, [](AsyncWebServerRequest *request) {
+        if (request->hasParam("question", true)) {
+            Question newQ;
+            newQ.id = nextQuestionId++;
+            newQ.text = request->getParam("question", true)->value();
+            newQ.optionA = request->getParam("optA", true)->value();
+            newQ.optionB = request->getParam("optB", true)->value();
+            newQ.optionC = request->getParam("optC", true)->value();
+            newQ.optionD = request->getParam("optD", true)->value();
+            newQ.initialCharAns = request->getParam("correctOpt", true)->value().charAt(0);
+
+            questionList.push_back(newQ);
+
+            printToSerial();
+            updateTFTDisplay();
+
+            request->redirect("/");
+        } else {
+            request->send(400, "text/plain", "Bad Request: Missing parameters.");
+        }
+    });
+
+    // ROUTE: POST HANDLER TO DELETE QUESTION BY ID
+    server.on("/delete-question", HTTP_POST, [](AsyncWebServerRequest *request) {
+        if (request->hasParam("id", true)) {
+            int deleteId = request->getParam("id", true)->value().toInt();
+
+            auto it = std::remove_if(questionList.begin(), questionList.end(),
+                [deleteId](const Question &q) { return q.id == deleteId; });
+
+            if (it != questionList.end()) {
+                questionList.erase(it, questionList.end());
+                // Serial.printf("[DELETE] Removed question ID #%d\n", deleteId);
+            }
+
+            printToSerial();
+            updateTFTDisplay();
+
+            request->redirect("/manage");
+        } else {
+            request->send(400, "text/plain", "Bad Request: Missing ID.");
+        }
+    });
+
+    server.onNotFound([](AsyncWebServerRequest *request) {
+        request->redirect("/");
+    });
+
+    server.begin();
+    // Serial.println("Async Web Server listening on port 80.");
+}
+
+void loop() {
+    dnsServer.processNextRequest();
+}
