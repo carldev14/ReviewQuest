@@ -28,16 +28,30 @@ public:
     // ==========================================
     // PUBLIC METHODS
     // ==========================================
-
-
-    // ==========================================
-    // PUBLIC METHODS
-    // ==========================================
+    /**
+     * @brief Show splash display
+     */
+    void showSplashScreen();
 
     /**
-     * @brief Show start screen
+     * @brief Show wifi credential screen
      */
-    void showStartScreen();
+    void showCredentialsScreen();
+
+    /**
+     * @brief Show start session screen
+     */
+    void showStartSessionScreen();
+
+    /**
+     * @brief Show NewSession: Asking the user to try another session
+     */
+    void showNewSessionScreen();
+
+    /**
+     * @brief Show showNoCurrentSessionScreen.
+     */
+    void showNoCurrentSessionScreen();
 
     /**
      * @brief Show question screen with choices
@@ -48,17 +62,17 @@ public:
     /**
      * @brief Show correct feedback
      */
-    void showCorrectFeedback();
+    void showCorrectFeedbackScreen();
 
     /**
      * @brief Show incorrect feedback
      */
-    void showIncorrectFeedback();
+    void showIncorrectFeedbackScreen();
 
     /**
      * @brief Show leaderboard with player scores
      */
-    void showLeaderboard();
+    void showLeaderboardScreen();
 
     /**
      * @brief Show completion screen
@@ -69,44 +83,47 @@ public:
      * @brief Show hint feedback
      * @param removedOption The option letter that was removed (A, B, C, D)
      */
-    void showHint(char removedOption);
+    void showHintScreen(char removedOption);
 
     /**
      * @brief Show pass to another player
      * @param currentPlayer Current player name
      * @param newPlayer New player name
      */
-    void showPassToPlayer(const String &currentPlayer, const String &newPlayer);
+    void showPassToPlayerScreen(const String &currentPlayer, const String &newPlayer);
 
     /**
      * @brief Show deduct points feedback
      * @param playerName Player name
      * @param pointsDeducted Points deducted
      */
-    void showDeductPoints(const String &playerName, int pointsDeducted);
+    void showDeductPointsScreen(const String &playerName, int pointsDeducted);
 
     /**
      * @brief Show increment question feedback
      */
-    void showIncrementQuestion();
-
-    /**
-     * @brief Show luck result
-     * @param isLucky True if lucky
-     * @param message Message to display
-     */
-    void showLuckResult(bool isLucky, const String &message);
+    void showIncrementQuestionScreen();
 
     /**
      * @brief Show elimination warning
      */
-    void showEliminationWarning();
+    void showEliminationWarningScreen();
+
+    /**
+     * @brief Show list of the possible savior for the current eliminate candidate
+     */
+    void showListPossibleSaviorScreen();
 
     /**
      * @brief Show eliminated player
      * @param playerName The name of the eliminated player
      */
-    void showEliminatedPlayer(const String &playerName);
+    void showEliminatedPlayerScreen(const String &playerName);
+
+    /**
+     * @brief Show none of the player are eliminated
+     */
+    void showNoneEliminatedScreen();
 
     /**
      * @brief Show no questions screen

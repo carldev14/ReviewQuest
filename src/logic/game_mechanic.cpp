@@ -12,7 +12,8 @@ GameMechanics::GameMechanics()
     : config(SystemConfig::get()),
       display(DisplayOutputs::get()),
       actuators(Actuators::get()),
-      helper(Helper::get())
+      helper(Helper::get()),
+      inputs(Inputs::get())
 {
     Serial.println("🎮 GameMechanics initialized!");
     initialized = true;
@@ -206,7 +207,7 @@ void GameMechanics::handleAnswer(char option)
 
             config.overallScore++;
             helper.updatePlayerScore(config.currentPlayerName, 1);
-            display.showCorrectFeedback();
+            display.showCorrectFeedbackScreen();
             actuators.runCorrectFeedbackAction();
 
             // MOVE TO NEXT QUESTION (skip the penalty question)
@@ -233,14 +234,14 @@ void GameMechanics::handleAnswer(char option)
             if (penaltyCount >= MAX_PENALTY_COUNT)
             {
                 Serial.println("💀 ELIMINATED! Too many penalty questions wrong!");
-                runElimination();
+                eliminatePlayer();
                 config.eliminationReason = SystemConfig::ELIM_PENALTY_QUESTION;
                 penaltyCount = 0;
                 isPenaltyQuestionActive = false;
             }
             else
             {
-                display.showIncorrectFeedback();
+                display.showIncorrectFeedbackScreen();
                 actuators.runIncorrectFeedbackAction();
                 config.displayState = SystemConfig::SHOW_INCORRECT;
                 config.stateStartTime = millis();
@@ -255,10 +256,11 @@ void GameMechanics::handleAnswer(char option)
         Serial.println("✅ NORMAL QUESTION - CORRECT");
         config.overallScore++;
         helper.updatePlayerScore(config.currentPlayerName, 1);
-        display.showCorrectFeedback();
+        display.showCorrectFeedbackScreen();
         actuators.runCorrectFeedbackAction();
 
-        // MOVE TO NEXT QUESTION
+        // ====== MOVE TO NEXT QUESTION
+
         config.currentQuestionPos++;
         Serial.printf("📊 Moved to question position: %d (of %d)\n",
                       config.currentQuestionPos, (int)config.questionOrder.size());
@@ -278,7 +280,7 @@ void GameMechanics::handleAnswer(char option)
     else
     {
         Serial.println("❌ NORMAL QUESTION - INCORRECT");
-        display.showIncorrectFeedback();
+        display.showIncorrectFeedbackScreen();
         actuators.runIncorrectFeedbackAction();
         config.displayState = SystemConfig::SHOW_INCORRECT;
         config.stateStartTime = millis();
@@ -334,32 +336,53 @@ void GameMechanics::runPenalty()
     bool isLucky = random(0, 100) < 50;
     Serial.printf("🎲 Random result: %s\n", isLucky ? "LUCKY" : "BAD LUCK");
 
+    // Overall luck roll: 50% good, 50% bad
     if (isLucky)
     {
-        Serial.println("🍀 GOOD LUCK - Skipping penalty");
+        Serial.println("🍀 GOOD LUCK");
 
-        // 10% chance to pass (even harder)
         int activePlayers = helper.getActivePlayerCount();
-        if (random(0, 100) < 10 && activePlayers > 1)
+
+        // Roll 0-99 for the good luck outcome
+        int roll = random(0, 100);
+
+        if (roll < 10 && activePlayers > 1)
         {
+            // 10% chance: pass to another player
             passToAnotherPlayer();
+        }
+        else if (roll < 50) // 10% to 49% = 40% chance
+        {
+            // 40% chance: give hint
+            giveHint();
         }
         else
         {
+            // 50% chance: this shouldn't happen if isLucky is true,
+            // but if it does, fall back to hint
             giveHint();
         }
     }
     else
     {
-        Serial.println("💀 BAD LUCK - Triggering penalty");
+        Serial.println("💀 BAD LUCK");
 
-        // 10% chance to increment question
-        if (random(0, 100) < 10)
+        int roll = random(0, 100);
+
+        if (roll < 10)
         {
+            // 10% chance: increment question
             incrementQuestion();
+        }
+        else if (roll < 50) // 10% to 49% = 40% chance
+        {
+            // 40% chance: deduct 1-2 points
+            int pointsToDeduct = (random(0, 2) == 0) ? 1 : 2;
+            deductPoints(pointsToDeduct);
         }
         else
         {
+            // 50% chance: shouldn't happen, fall back to deduct
             int pointsToDeduct = (random(0, 2) == 0) ? 1 : 2;
             deductPoints(pointsToDeduct);
         }
@@ -367,36 +390,27 @@ void GameMechanics::runPenalty()
     Serial.println("========================================");
 }
 
-// ==========================================
-// ELIMINATION
-// ==========================================
-
-void GameMechanics::runElimination()
+void GameMechanics::endGameOnePlayer()
 {
-    Serial.println("========================================");
-    Serial.println("💀 RUNNING ELIMINATION");
-    Serial.println("========================================");
-
-    // Check if can eliminate (at least 2 players remain)
-    if (!canEliminate())
+    // Guard: Only check for game end if the game is actually running.
+    // Skip if we are in pre-game states or already finished.
+    if (config.displayState == SystemConfig::SHOW_START ||
+        config.displayState == SystemConfig::SHOW_UPLOADED ||
+        config.displayState == SystemConfig::SHOW_NO_CURRENT_SESSION ||
+        config.displayState == SystemConfig::SHOW_CREDENTIALS ||
+        config.displayState == SystemConfig::SHOW_NEW_SESSION ||
+        config.displayState == SystemConfig::SHOW_COMPLETE ||
+        config.displayState == SystemConfig::SHOW_LEADERBOARD)
     {
-        Serial.println("❌ Cannot eliminate - only one player remains!");
-        display.showCompletionScreen();
-        delay(1500);
         return;
     }
 
-    // Eliminate the current player
-    eliminateCurrentPlayer();
-
-    delay(1500);
-
-    // Check if only one player remains
-    if (config.playerScores.size() <= 1)
+    if (helper.getActivePlayerCount() <= 1)
     {
-        Serial.println("🏆 Only one player remains!");
-        config.displayState = SystemConfig::SHOW_COMPLETE;
+        Serial.println("End the game: Only one player stays");
         display.showCompletionScreen();
+        config.endGameRunOnce = true;
+        return; // Stopping whenever next execution is
     }
 }
 
@@ -459,7 +473,7 @@ void GameMechanics::giveHint()
             break;
         }
 
-        display.showHint(toRemove);
+        display.showHintScreen(toRemove);
         delay(1500);
         display.showQuestionScreen(originalIndex);
     }
@@ -471,14 +485,17 @@ void GameMechanics::resetAllHints()
     {
         q.hintUsed = false;
         // Restore options if they were removed
-        if (q.optionA == "[REMOVED]") q.optionA = q.originalOptionA;
-        if (q.optionB == "[REMOVED]") q.optionB = q.originalOptionB;
-        if (q.optionC == "[REMOVED]") q.optionC = q.originalOptionC;
-        if (q.optionD == "[REMOVED]") q.optionD = q.originalOptionD;
+        if (q.optionA == "[REMOVED]")
+            q.optionA = q.originalOptionA;
+        if (q.optionB == "[REMOVED]")
+            q.optionB = q.originalOptionB;
+        if (q.optionC == "[REMOVED]")
+            q.optionC = q.originalOptionC;
+        if (q.optionD == "[REMOVED]")
+            q.optionD = q.originalOptionD;
     }
     Serial.println("🔄 All hints reset!");
 }
-
 
 void GameMechanics::passToAnotherPlayer()
 {
@@ -486,7 +503,7 @@ void GameMechanics::passToAnotherPlayer()
 
     String newPlayer = getRandomOtherPlayer();
 
-    display.showPassToPlayer(config.currentPlayerName, newPlayer);
+    display.showPassToPlayerScreen(config.currentPlayerName, newPlayer);
     delay(1500);
 
     config.currentPlayerName = newPlayer;
@@ -499,7 +516,7 @@ void GameMechanics::passToAnotherPlayer()
 void GameMechanics::deductPoints(int pointsToDeduct)
 {
     Serial.println("💀 DEDUCTING POINTS!");
-    display.showDeductPoints(config.currentPlayerName, pointsToDeduct);
+    display.showDeductPointsScreen(config.currentPlayerName, pointsToDeduct);
     delay(1500);
 
     int currentScore = 0;
@@ -531,7 +548,7 @@ void GameMechanics::deductPoints(int pointsToDeduct)
 
         if (newScore == 0)
         {
-            runElimination();
+            eliminatePlayer();
             config.eliminationReason = SystemConfig::ELIM_DEDUCT_POINTS;
             return;
         }
@@ -566,6 +583,10 @@ String GameMechanics::getRandomOtherPlayer()
     return otherPlayers[randomIndex];
 }
 
+// ==========================================
+// ELIMINATION
+// ==========================================
+
 bool GameMechanics::canEliminate()
 {
     int activeCount = 0;
@@ -579,42 +600,181 @@ bool GameMechanics::canEliminate()
     return activeCount >= 2;
 }
 
-void GameMechanics::eliminateCurrentPlayer()
+String GameMechanics::reviveByPeerEliminate()
+{
+    // Reset selection state
+    config.revivingProcess = false;
+    config.refuseToRevive = false;
+    config.selectedSaviorIndex = 0; // Start at first player (not -1)
+
+    // Show the list of possible saviors
+    display.showListPossibleSaviorScreen();
+
+    int lastIndex = -1; // Track last displayed index
+
+    // WAIT for button press - UPDATE DISPLAY in loop
+    while (!config.revivingProcess)
+    {
+        inputs.choicesButtonSavior();
+
+        // ✅ Update display when selection changes
+        if (lastIndex != config.selectedSaviorIndex)
+        {
+            lastIndex = config.selectedSaviorIndex;
+            display.showListPossibleSaviorScreen();
+
+            // Redraw footer
+            tft.setTextColor(ST77XX_CYAN);
+            tft.setCursor(10, 220);
+            tft.print("B:Down  C:Up  A:Select  D:Skip");
+        }
+
+        delay(50);
+    }
+
+    // Check if player refused to save
+    if (config.refuseToRevive)
+    {
+        Serial.println("🚫 Player refused to save!");
+        // Return empty string - no one willing to save
+        return "";
+    }
+
+    // Get the selected player name
+    String saviorPlayerName = "";
+
+    if (config.selectedSaviorIndex >= 0 && config.selectedSaviorIndex < config.getMaxPlayer())
+    {
+        saviorPlayerName = config.playerScores[config.selectedSaviorIndex].name;
+    }
+
+    // GUARD: Check if empty
+    if (saviorPlayerName.isEmpty())
+    {
+        Serial.println("⚠️ Player candidate is empty!");
+        return "";
+    }
+
+    // GUARD: Validate player exists
+    bool playerExists = false;
+    for (const auto &player : config.playerScores)
+    {
+        if (player.name == saviorPlayerName)
+        {
+            playerExists = true;
+            break;
+        }
+    }
+
+    if (!playerExists)
+    {
+        Serial.printf("⚠️ Player '%s' not found!\n", saviorPlayerName.c_str());
+        return "";
+    }
+
+    // GUARD: Check if player is already eliminated
+    for (const auto &player : config.playerScores)
+    {
+        if (player.name == saviorPlayerName && player.isEliminated)
+        {
+            Serial.printf("⚠️ Player '%s' is already eliminated!\n", saviorPlayerName.c_str());
+            return "";
+        }
+    }
+
+    Serial.printf("✅ Player '%s' selected for elimination\n", saviorPlayerName.c_str());
+    return saviorPlayerName;
+}
+
+void GameMechanics::eliminatePlayer()
 {
     Serial.println("========================================");
-    Serial.println("💀 ELIMINATE CURRENT PLAYER");
+    Serial.println("💀 RUNNING ELIMINATION");
     Serial.println("========================================");
 
+    // Check if can eliminate (at least 2 players remain)
+    if (!canEliminate())
+    {
+        Serial.println("❌ Cannot eliminate - only one player remains!");
+        display.showCompletionScreen();
+        delay(1500);
+        return;
+    }
+
     // ===== Get eliminated player name =====
-    String eliminatedPlayer = config.currentPlayerName;
-    Serial.printf("💀 Eliminating: %s\n", eliminatedPlayer.c_str());
+    String saviorPlayerName = reviveByPeerEliminate();
+    String playerEliminatedCandidate = "";
+    bool isSaviorEliminated = false;
+    bool hasSavior = !saviorPlayerName.isEmpty();
+
+    /**
+     * If the SaviorPlayerName String is not empty.
+     * Therefore, there is someone willing to save the player, so run the savior's destiny.
+     */
+    if (hasSavior)
+    {
+        // 70/30 chance: savior gets eliminated instead (HARDER)
+        if (random(0, 100) > 30) // 70% chance of elimination
+        {
+            // The savior will be eliminated on their behalf
+            isSaviorEliminated = true;
+            playerEliminatedCandidate = saviorPlayerName;
+            Serial.printf("🔄 Savior %s will be eliminated instead!\n", saviorPlayerName.c_str());
+            config.eliminationReason = SystemConfig::ELIM_SACRIFICIAL_CONS;
+        }
+        else
+        {
+            // No one gets eliminated (savior saved the current player)
+            isSaviorEliminated = false;
+            Serial.printf("✅ Savior %s saved the current player! No elimination.\n", saviorPlayerName.c_str());
+            display.showNoneEliminatedScreen();
+            return;
+        }
+    }
+    else
+    {
+        // No savior found - current player is eliminated
+        playerEliminatedCandidate = config.currentPlayerName;
+        Serial.printf("💀 No savior found! %s is eliminated.\n", config.currentPlayerName.c_str());
+        config.eliminationReason = SystemConfig::ELIM_REFUSE_TO_REVIVE;
+    }
+
+    Serial.print("Player Candidate: ");
+    Serial.println(playerEliminatedCandidate);
+
+    Serial.printf("💀 Eliminating: %s\n", playerEliminatedCandidate.c_str());
 
     // ===== 1. Mark player as eliminated =====
     bool found = false;
     for (auto &player : config.playerScores)
     {
-        if (player.name == eliminatedPlayer)
+        if (player.name == playerEliminatedCandidate)
         {
-            player.score = 0;
             player.isEliminated = true;
             found = true;
-            Serial.printf("💀 %s marked as eliminated!\n", eliminatedPlayer.c_str());
+            Serial.printf("💀 %s marked as eliminated!\n", playerEliminatedCandidate.c_str());
             break;
         }
     }
 
+    // Resort players so active players are at the front
+    helper.sortPlayers();
+
     if (!found)
     {
-        Serial.printf("⚠️ Player '%s' not found in playerScores!\n", eliminatedPlayer.c_str());
+        Serial.printf("⚠️ Player '%s' not found in playerScores!\n", playerEliminatedCandidate.c_str());
         // Print all players for debugging
         for (const auto &p : config.playerScores)
         {
             Serial.printf("  Available: %s\n", p.name.c_str());
         }
+        Serial.println("========================================");
+        return;
     }
 
     // ===== 2. Show elimination on display =====
-    display.showEliminatedPlayer(eliminatedPlayer);
+
+    display.showEliminatedPlayerScreen(playerEliminatedCandidate);
     actuators.runIncorrectFeedbackAction();
     delay(1500);
 

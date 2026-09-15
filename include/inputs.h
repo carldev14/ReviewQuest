@@ -41,6 +41,10 @@ public:
      */
     ButtonEvent processSmartButton();
 
+    void choicesButtonSavior();
+
+    int confirmationSessionButton();
+
     unsigned long getLastDebounceTime() const { return lastDebounceTime; }
     void setLastDebounceTime(unsigned long time) { lastDebounceTime = time; }
 
@@ -50,7 +54,6 @@ private:
 
     Inputs(const Inputs &) = delete;
     Inputs &operator=(const Inputs &) = delete;
-
     // Timing constants
     const unsigned long debounceDelay = 50;       // Debounce interval (ms)
     const unsigned long DOUBLE_CLICK_DELAY = 300; // Window to wait for 2nd click (ms)

@@ -10,6 +10,7 @@
 #include <random>
 #include "system/config.h"
 #include "display.h"
+#include "inputs.h"
 #include "actuators.h"
 #include "helper.h"
 
@@ -37,12 +38,6 @@ public:
      * Called after a correct answer
      */
     void runPenalty();
-
-    /**
-     * @brief Run the elimination system
-     * Called when a player reaches 0 or negative points
-     */
-    void runElimination();
 
     /**
      * @brief Initialize the game mechanics with default values
@@ -90,6 +85,11 @@ public:
      */
     void resetAllHints();
 
+    /**
+     * @brief Check and run if there is only one player left in the session, therefore, end it.
+     */
+    void endGameOnePlayer();
+    
     // Flag to track if penalty has been applied
     bool isPenaltyAccomplished = false;
 
@@ -153,7 +153,14 @@ private:
     /**
      * @brief Eliminate the current player
      */
-    void eliminateCurrentPlayer();
+    void eliminatePlayer();
+
+    /**
+     * @brief Responsible for saving eliminated player, but with twist. The peers can revive it, but carries
+     * significant risk afterward: Eliminated on his behalf. However, if none, therefore, continue to eliminate the
+     * current player, and reprogress once again the game.
+     */
+    String reviveByPeerEliminate();
 
     /**
      * @brief Show luck result on TFT
@@ -171,7 +178,8 @@ private:
     // ==========================================
     // MEMBER VARIABLES
     // ==========================================
-    SystemConfig &config;    // Reference to singleton
+    SystemConfig &config; // Reference to singleton
+    Inputs &inputs;
     DisplayOutputs &display; // Reference to singleton
     Actuators &actuators;    // Reference to singleton
     Helper &helper;          // Reference to singleton

@@ -3,6 +3,7 @@
  * @brief Input handling implementation with smart button gestures
  */
 #include "inputs.h"
+#include "helper.h"
 
 Inputs &Inputs::get()
 {
@@ -103,20 +104,6 @@ char Inputs::choicesButtonProcessor()
         {
             lastButtonPressTime[0] = currentTime;
             ans = 'A';
-
-            if (currentTime - lastAPressTime < DOUBLE_CLICK_DELAY)
-            {
-                aPressCount++;
-                if (aPressCount >= 2)
-                {
-                    aDoubleClickDetected = true;
-                }
-            }
-            else
-            {
-                aPressCount = 1;
-            }
-            lastAPressTime = currentTime;
         }
         else if (digitalRead(SystemConfig::INPUT_B) == LOW &&
                  currentTime - lastButtonPressTime[1] > debounceDelay)
@@ -144,4 +131,68 @@ char Inputs::choicesButtonProcessor()
     }
 
     return ans;
+}
+
+void Inputs::choicesButtonSavior()
+{
+    SystemConfig &config = SystemConfig::get();
+    Helper &helper = Helper::get();
+    unsigned long currentTime = millis();
+    int activePlayers = helper.getActivePlayerCount();
+
+    if (activePlayers == 0)
+        return;
+
+    // Button A: Select/Confirm current selection
+    if (digitalRead(SystemConfig::INPUT_A) == LOW && currentTime - lastButtonPressTime[0] > debounceDelay + 200) // debounce 250
+    {
+        lastButtonPressTime[0] = currentTime;
+        config.revivingProcess = true;
+        config.refuseToRevive = false;
+        Serial.printf("✅ Savior selected: %d\n", config.selectedSaviorIndex);
+    }
+    // Button B: Scroll
+    else if (digitalRead(SystemConfig::INPUT_B) == LOW && currentTime - lastButtonPressTime[1] > debounceDelay + 200) // debounce 250
+    {
+        lastButtonPressTime[1] = currentTime;
+        config.selectedSaviorIndex++;
+        if (config.selectedSaviorIndex >= activePlayers)
+        {
+            config.selectedSaviorIndex = 0; // Wrap to beginning
+        }
+        config.revivingProcess = false;
+        config.refuseToRevive = false;
+        Serial.printf("⬇️ Savior index: %d\n", config.selectedSaviorIndex);
+    }
+    // Button C: Refuse to revive
+    else if (digitalRead(SystemConfig::INPUT_C) == LOW && currentTime - lastButtonPressTime[2] > debounceDelay + 200) // debounce 250
+    {
+        lastButtonPressTime[3] = currentTime;
+        config.refuseToRevive = true;
+        config.revivingProcess = true;   // Exit the loop
+        config.selectedSaviorIndex = -1; // No selection
+        Serial.println("🚫 Refused to save!");
+    }
+}
+
+int Inputs::confirmationSessionButton()
+{
+    SystemConfig &config = SystemConfig::get();
+    unsigned long currentTime = millis();
+
+    // Button A: Initialize new session
+    if (digitalRead(SystemConfig::INPUT_A) == LOW && currentTime - lastButtonPressTime[0] > debounceDelay + 200) // debounce 250
+    {
+        lastButtonPressTime[0] = currentTime;
+        config.isNewSesion = true;
+        return 1;
+    }
+    // Button B: Re-start with the current session
+    else if (digitalRead(SystemConfig::INPUT_B) == LOW && currentTime - lastButtonPressTime[1] > debounceDelay + 200) // debounce 250
+    {
+        lastButtonPressTime[1] = currentTime;
+        config.isNewSesion = false;
+        return 2;
+    }
+    return 0;
 }

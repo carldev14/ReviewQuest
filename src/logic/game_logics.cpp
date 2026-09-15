@@ -2,41 +2,43 @@
  * @file game_logic.cpp
  * @brief Game logic implementation
  */
-#include "game_logic.h"
+#include "game_logics.h"
 
 // ==========================================
 // CONSTRUCTOR & DESTRUCTOR
 // ==========================================
 
-GameLogic::GameLogic()
+GameLogics::GameLogics()
     : config(SystemConfig::get()),
       display(DisplayOutputs::get()),
       actuators(Actuators::get()),
       helper(Helper::get()),
-      gameMechanics(GameMechanics::get())
+      gameMechanics(GameMechanics::get()),
+      inputs(Inputs::get()),
+      session(Session::get())
 {
-    Serial.println("🎯 GameLogic initialized!");
+    Serial.println("🎯 GameLogics initialized!");
     initialized = true;
 }
 
-GameLogic::~GameLogic()
+GameLogics::~GameLogics()
 {
-    Serial.println("GameLogic destroyed!");
+    Serial.println("GameLogics destroyed!");
 }
 
 // ==========================================
 // PUBLIC METHODS
 // ==========================================
 
-void GameLogic::initialize()
+void GameLogics::initialize()
 {
-    Serial.println("🔧 Initializing GameLogic...");
+    Serial.println("🔧 Initializing GameLogics...");
     resetGameState();
     // Set to SHOW_START initially
     config.displayState = SystemConfig::SHOW_START;
 }
 
-void GameLogic::startQuiz()
+void GameLogics::startQuiz()
 {
     Serial.println("========================================");
     Serial.println("🚀 STARTING QUIZ");
@@ -90,16 +92,7 @@ void GameLogic::startQuiz()
     printSystemStatus();
 }
 
-void GameLogic::endGameOnePlayer()
-{
-    if (helper.getActivePlayerCount() <= 0)
-    {
-        Serial.println("End the game: Only one player stays");
-        display.showCompletionScreen();
-    }
-}
-
-void GameLogic::advanceToNextQuestion()
+void GameLogics::advanceToNextQuestion()
 {
     Serial.println("➡️ ADVANCING TO NEXT QUESTION");
     Serial.printf("📊 Current position: %d, Order size: %d\n",
@@ -177,7 +170,7 @@ void GameLogic::advanceToNextQuestion()
                   config.currentPlayerName.c_str());
 }
 
-void GameLogic::retryQuestion()
+void GameLogics::retryQuestion()
 {
     Serial.println("🔄 RETRYING QUESTION");
 
@@ -208,7 +201,7 @@ void GameLogic::retryQuestion()
     Serial.printf("🔄 Retrying Q%d - %s's turn\n", originalIndex + 1, config.currentPlayerName.c_str());
 }
 
-void GameLogic::handleFeedbackTimer()
+void GameLogics::handleFeedbackTimer()
 {
     if (config.isLuckActive)
     {
@@ -232,29 +225,50 @@ void GameLogic::handleFeedbackTimer()
     }
 }
 
-void GameLogic::restartGame()
+void GameLogics::tryNewSession()
 {
-    Serial.println("🔄 RESTARTING GAME");
+    display.showNewSessionScreen();     // Show the screen asking the user whether want to create new one.
 
-    // Reset to start screen first
-    display.showRestartGameScreen();
+    // Wait for user input (Button A or B)
+    while (inputs.confirmationSessionButton() == 0)
+    {
+        delay(10); // Small delay to prevent watchdog trigger and allow CPU breathing
+    }
 
-    // ===== RESET SOMETHING BEFORE START FRESH
-    gameMechanics.resetAllHints();
-
-    // Then start quiz after a delay
-    delay(1000);
-    startQuiz();
-    Serial.println("✅ Game restarted!");
+    if (config.isNewSesion)
+    {
+        session.enableWifiSession(); // Start the wifi session.
+    }
+    else
+    {
+        restartGame();
+    }
 }
 
-void GameLogic::handleAnswer(char option)
+void GameLogics::handleAnswer(char option)
 {
-    Serial.printf("🎯 GameLogic::handleAnswer called with: %c\n", option);
+    Serial.printf("🎯 GameLogics::handleAnswer called with: %c\n", option);
     gameMechanics.handleAnswer(option);
 }
 
-void GameLogic::printSystemStatus()
+void GameLogics::clearSession()
+{
+    Serial.println("🗑️ Clearing Session...");
+
+    // 1. Completely wipe configuration values (Questions, Players, etc.)
+    config.initialValues();
+
+    // 2. Reset state indices
+    resetGameState();
+
+    // 3. Set display state and show the "No Session" screen
+    config.displayState = SystemConfig::SHOW_NO_CURRENT_SESSION;
+    display.showNoCurrentSessionScreen();
+
+    Serial.println("✅ Session cleared. System ready for new upload.");
+}
+
+void GameLogics::printSystemStatus()
 {
     Serial.println("=========================================");
     Serial.println("🔍 SYSTEM STATUS");
@@ -272,7 +286,7 @@ void GameLogic::printSystemStatus()
     Serial.println("=========================================");
 }
 
-void GameLogic::checkMemory()
+void GameLogics::checkMemory()
 {
     static int lastHeap = 0;
     int currentHeap = ESP.getFreeHeap();
@@ -283,7 +297,7 @@ void GameLogic::checkMemory()
     lastHeap = currentHeap;
 }
 
-void GameLogic::resetToStartScreen()
+void GameLogics::resetToStartScreen()
 {
     config.displayState = SystemConfig::SHOW_START;
     config.currentQuestionPos = 0;
@@ -294,7 +308,7 @@ void GameLogic::resetToStartScreen()
     config.isLuckActive = false;
     config.stateStartTime = 0;
     gameMechanics.resetPenaltyCount();
-    display.showStartScreen();
+    display.showStartSessionScreen();
     Serial.println("🔄 Reset to start screen!");
 }
 
@@ -302,7 +316,7 @@ void GameLogic::resetToStartScreen()
 // PRIVATE METHODS
 // ==========================================
 
-bool GameLogic::canStartQuiz()
+bool GameLogics::canStartQuiz()
 {
     if (config.questionList.empty())
     {
@@ -319,7 +333,7 @@ bool GameLogic::canStartQuiz()
     return true;
 }
 
-void GameLogic::resetGameState()
+void GameLogics::resetGameState()
 {
     config.currentQuestionPos = 0;
     config.currentPlayerPos = 0;
@@ -331,9 +345,28 @@ void GameLogic::resetGameState()
     // DON'T set displayState here - let the calling function decide
 }
 
-void GameLogic::showError(const String &title, const String &message)
+void GameLogics::showError(const String &title, const String &message)
 {
     display.showMessage(title, message, ST77XX_RED);
     delay(2000);
     resetToStartScreen();
+}
+
+// Private
+void GameLogics::restartGame()
+{
+    Serial.println("🔄 RESTARTING GAME");
+
+    // Reset to start screen first
+    display.showRestartGameScreen();
+
+    // ===== RESET SOMETHING BEFORE START FRESH
+    gameMechanics.resetAllHints();
+    helper.resetPlayerScores();
+    config.endGameRunOnce = false;
+
+    // Then start quiz after a delay
+    delay(1000);
+    startQuiz();
+    Serial.println("✅ Game restarted!");
 }

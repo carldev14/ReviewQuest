@@ -7,20 +7,22 @@
 
 #include <Arduino.h>
 #include "system/config.h"
+#include "session.h"
 #include "display.h"
 #include "actuators.h"
 #include "helper.h"
 #include "game_mechanics.h"
+#include "inputs.h"
 
-class GameLogic
+class GameLogics
 {
 public:
     // ==========================================
     // SINGLETON INSTANCE
     // ==========================================
-    static GameLogic &get()
+    static GameLogics &get()
     {
-        static GameLogic instance;
+        static GameLogics instance;
         return instance;
     }
 
@@ -54,15 +56,20 @@ public:
     void handleFeedbackTimer();
 
     /**
-     * @brief Restart the game
+     * @brief Try new session?
      */
-    void restartGame();
+    void tryNewSession();
 
     /**
      * @brief Handle answer from player
      * @param option The selected answer (A, B, C, D)
      */
     void handleAnswer(char option);
+
+    /**
+     * @brief Clear the current session (questions, players) and return to start screen
+     */
+    void clearSession();
 
     /**
      * @brief Print system status for debugging
@@ -75,11 +82,6 @@ public:
     void checkMemory();
 
     /**
-     * @brief Check and run if there is only one player left in the session, therefore, end it.
-     */
-    void endGameOnePlayer();
-
-    /**
      * @brief Get current game state
      */
     int getCurrentQuestionPos() const { return config.currentQuestionPos; }
@@ -90,12 +92,12 @@ private:
     // ==========================================
     // PRIVATE CONSTRUCTOR (Singleton)
     // ==========================================
-    GameLogic();
-    ~GameLogic();
+    GameLogics();
+    ~GameLogics();
 
     // Delete copy
-    GameLogic(const GameLogic &) = delete;
-    GameLogic &operator=(const GameLogic &) = delete;
+    GameLogics(const GameLogics &) = delete;
+    GameLogics &operator=(const GameLogics &) = delete;
 
     // ==========================================
     // PRIVATE METHODS
@@ -114,6 +116,11 @@ private:
     void resetToStartScreen();
 
     /**
+     * @brief Restart the game
+     */
+    void restartGame();
+
+    /**
      * @brief Show error message on screen
      * @param title Error title
      * @param message Error message
@@ -121,12 +128,14 @@ private:
     void showError(const String &title, const String &message);
 
     // ==========================================
-    // MEMBER VARIABLES
+    // MEMBER VARIABLES: SINGLETONS (INITIALIZE ONCE)
     // ==========================================
     SystemConfig &config;
     DisplayOutputs &display;
     Actuators &actuators;
     Helper &helper;
+    Inputs &inputs;
+    Session &session;
     GameMechanics &gameMechanics;
     bool initialized = false;
 };

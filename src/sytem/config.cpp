@@ -3,36 +3,38 @@
  * @brief SystemConfig implementation
  */
 #include "system/config.h"
+#include <Preferences.h>
 
 void SystemConfig::initialize()
 {
-    if (initialized) {
+    if (initialized)
+    {
         // Serial.println("⚠️ System already initialized!");
         return;
     }
-    
+
     // Serial.println("🔧 Initializing SystemConfig...");
-    
+
     // Initialize pin modes
     pinMode(CORRECT_LED, OUTPUT);
     pinMode(INCORRECT_LED, OUTPUT);
     pinMode(BUZZER_PIN, OUTPUT);
-    
+
     pinMode(INPUT_A, INPUT_PULLUP);
     pinMode(INPUT_B, INPUT_PULLUP);
     pinMode(INPUT_C, INPUT_PULLUP);
     pinMode(INPUT_D, INPUT_PULLUP);
     pinMode(INPUT_START, INPUT_PULLUP);
-    pinMode(DEEP_SLEEP_BUTTON, INPUT_PULLUP);
-    
+
     // Set initial LED states
     digitalWrite(CORRECT_LED, LOW);
     digitalWrite(INCORRECT_LED, LOW);
     digitalWrite(BUZZER_PIN, LOW);
-    
+
     // Initialize default values
     initialValues();
-    
+
+
     initialized = true;
     // Serial.println("✅ SystemConfig initialized!");
 }
@@ -67,13 +69,15 @@ void SystemConfig::ListQuestions()
     // Serial.println("\n=========================================");
     // Serial.printf("📚 TOTAL QUESTIONS: %d\n", (int)questionList.size());
     // Serial.println("=========================================");
-    
-    if (questionList.empty()) {
+
+    if (questionList.empty())
+    {
         // Serial.println("❌ No questions available!");
         return;
     }
-    
-    for (const auto &q : questionList) {
+
+    for (const auto &q : questionList)
+    {
         // Serial.printf("\n🔹 #%d: %s\n", q.id, q.text.c_str());
         // Serial.printf("   A) %s %s\n", q.optionA.c_str(), q.initialCharAns == 'A' ? "✅ [CORRECT]" : "");
         // Serial.printf("   B) %s %s\n", q.optionB.c_str(), q.initialCharAns == 'B' ? "✅ [CORRECT]" : "");
@@ -83,8 +87,16 @@ void SystemConfig::ListQuestions()
     }
     // Serial.println("=========================================\n");
 }
+
+int SystemConfig::getMaxPlayer()
+{
+    SystemConfig &config = SystemConfig::get();
+    return min(static_cast<int>(config.playerScores.size()), 5);
+}
+
 SystemConfig &SystemConfig::get()
 {
     static SystemConfig instance;
     return instance;
 }
+

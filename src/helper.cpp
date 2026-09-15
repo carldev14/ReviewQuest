@@ -86,7 +86,7 @@ void Helper::shuffleQuestionOptions()
         q.originalOptionB = q.optionB;
         q.originalOptionC = q.optionC;
         q.originalOptionD = q.optionD;
-        
+
         // Reset hint flag
         q.hintUsed = false;
 
@@ -522,6 +522,15 @@ void Helper::sortPlayersByScore()
             }
         }
     }
+}
+
+void Helper::sortPlayers()
+{
+    SystemConfig &config = SystemConfig::get();
+    // Use stable_partition to move active players to the front while preserving relative order
+    std::stable_partition(config.playerScores.begin(), config.playerScores.end(), [](const SystemConfig::PlayerScore &p)
+                          { return !p.isEliminated; });
+    Serial.println("🔄 Player scores resorted: Active players moved to front.");
 }
 
 int Helper::getActivePlayerCount()
