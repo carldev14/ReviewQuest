@@ -1,0 +1,466 @@
+================================================================================
+  TFT_eSPI MIGRATION CHANGELOG — TPM408-2.8 (ST7789 + XPT2046)
+  Project: ReviewQuest
+  Date: 2026
+================================================================================
+
+PURPOSE
+-------
+Migrate the ReviewQuest quiz game display from the Adafruit ST7789 driver
+(slow, separate touch library, conflicting build flags) to the TFT_eSPI
+library (faster, integrated touch, single config file). Along the way, fix
+the TPM408's characteristic color-order and inversion quirks that the
+library does not handle out of the box.
+
+Hardware:
+  - ESP32 Dev Module
+  - TPM408-2.8" TFT (ST7789 driver, 240x320 native, landscape via rotation)
+  - XPT2046 resistive touch controller
+  - 6 physical buttons (A, B, C, D, Start) + buzzer + 2 LEDs
+
+
+================================================================================
+  PART 1 — PIN CONFLICT DISCOVERY
+================================================================================
+
+Problem:
+  Touch controller requires GPIO 19 (MISO / T_DO) to send coordinates back
+  to the ESP32. But SystemConfig had:
+      static constexpr int BUZZER_PIN = 19;
+  The buzzer was silently blocking the MISO line — touch worked sometimes,
+  failed otherwise.
+
+Change:
+  SystemConfig.h:
+    -  static constexpr int BUZZER_PIN = 19;
+    +  static constexpr int BUZZER_PIN = 13;
+
+Purpose:
+  Frees GPIO 19 for the shared SPI MISO line (TFT SDO + XPT2046 T_DO).
+  Without this, touch cannot work reliably regardless of library used.
+
+
+================================================================================
+  PART 2 — LIBRARY MIGRATION (Adafruit -> TFT_eSPI)
+================================================================================
+
+2.1  platformio.ini
+-------------------
+Removed:
+    adafruit/Adafruit ST7789 Library
+    adafruit/Adafruit GFX Library
+    paulstoffregen/XPT2046_Touchscreen
+
+Kept / added:
+    bodmer/TFT_eSPI @ ^2.5.43
+
+Purpose:
+  TFT_eSPI bundles display driver + touch driver + graphics engine in
+  one library. Removes three dependencies. Faster rendering
+  (3-10x vs Adafruit). Single point of pin configuration.
+
+2.2  main.cpp — includes and object
+-----------------------------------
+Before:
+    #include <Adafruit_GFX.h>
+    #include <Adafruit_ST7789.h>
+    Adafruit_ST7789 tft = Adafruit_ST7789(TFT_CS, TFT_DC, TFT_RST);
+
+After:
+    #include <TFT_eSPI.h>
+    TFT_eSPI tft = TFT_eSPI();       // pins come from User_Setup.h
+
+Purpose:
+  TFT_eSPI reads pins and panel geometry at compile time from its config
+  file — the object is constructed with no arguments.
+
+2.3  main.cpp — init block
+--------------------------
+Before:
+    tft.init(240, 320);
+    tft.invertDisplay(true);
+    tft.setRotation(1);
+    tft.fillScreen(ST77XX_BLACK);
+
+After:
+    tft.init();
+    tft.setRotation(1);
+    tft.fillScreen(TFT_BLACK);
+
+Purpose:
+  - init() takes no args — size comes from User_Setup.h.
+  - invertDisplay() is handled by the library's init table (see Part 3).
+  - Color constant naming: ST77XX_* -> TFT_*.
+
+2.4  display.h / display.cpp / game_mechanics.h / game_mechanics.cpp
+---------------------------------------------------------------------
+Global replace across all source files:
+    ST77XX_BLACK    -> TFT_BLACK
+    ST77XX_WHITE    -> TFT_WHITE
+    ST77XX_RED      -> TFT_RED
+    ST77XX_GREEN    -> TFT_GREEN
+    ST77XX_BLUE     -> TFT_BLUE
+    ST77XX_YELLOW   -> TFT_YELLOW
+    ST77XX_CYAN     -> TFT_CYAN
+    ST77XX_MAGENTA  -> TFT_MAGENTA
+    ST77XX_ORANGE   -> TFT_ORANGE
+    ST77XX_DARKGREY -> TFT_DARKGREY
+
+And in each header that declared the display:
+    extern Adafruit_ST7789 tft;   ->   extern TFT_eSPI tft;
+
+Purpose:
+  Adafruit_GFX and TFT_eSPI share a nearly identical drawing API
+  (fillScreen, drawRect, setTextSize, print, etc.), so the migration is
+  mostly a mechanical rename. No logic changes needed.
+
+2.5  Removed leftovers
+----------------------
+-  #include <Adafruit_GFX.h>
+-  #include <Adafruit_ST7789.h>
+-  #include <Adafruit_ST7735.h>
+-  #include <XPT2046_Touchscreen.h>
+-  extern Adafruit_ST7789 tft;
+
+Purpose:
+  No Adafruit dependency remains. Project-wide check:
+    grep -rn "Adafruit\|ST77XX" src/
+  should return nothing.
+
+
+================================================================================
+  PART 3 — COLOR FIX (TPM408 quirk)
+================================================================================
+
+3.1  Symptom
+------------
+Colors came out in the wrong order despite correct wiring:
+    Sent RED   -> saw BLUE
+    Sent BLUE  -> saw RED
+    Sent GREEN -> saw PURPLE (composite of R+B leak)
+
+The TPM408's ST7789 ships configured as BGR (blue-green-red byte order),
+while TFT_eSPI's default assumption is RGB. Result: every pixel's red and
+blue channels are swapped.
+
+3.2  Attempted fixes that DID NOT work
+--------------------------------------
+a) Build flags in platformio.ini:
+       -D TFT_RGB_ORDER=TFT_BGR
+       -D TFT_INVERSION_ON
+   Why it failed:
+       TFT_eSPI's User_Setup.h and build flags have ordering dependencies.
+       With USER_SETUP_LOADED=1, some flags are silently ignored by the
+       library's macro logic. The Serial diagnostic showed
+       TFT_RGB_ORDER = 0 (RGB) despite the flag being set — proving the
+       flag never reached the compiler.
+
+b) Runtime MADCTL writes in setup():
+       tft.writecommand(0x36);
+       tft.writedata(0xA8);
+   Why it failed:
+       TFT_eSPI's writecommand/writedata must be called inside an active
+       SPI transaction (startWrite/endWrite). Called outside, they are
+       silently dropped or overwritten by the library's own display
+       updates. Runtime changes had no effect — confirmed by cycling
+       through 8 MADCTL values and seeing zero visual change.
+
+3.3  The fix that WORKED
+------------------------
+Two edits in lib/TFT_eSPI/TFT_Drivers/ST7789_Init.h:
+
+Edit 1 — MADCTL register write (line ~19):
+    Before:
+        writedata(TFT_MAD_COLOR_ORDER);
+    After:
+        writedata(0x68);   // MX | MV | BGR
+
+    Bit breakdown of 0x68:
+        0x20 = MV   (row/column exchange — needed for landscape)
+        0x40 = MX   (mirror X — compensates for panel mounting)
+        0x08 = BGR  (blue-green-red color order)
+        Result: correct landscape orientation + correct colors.
+
+Edit 2 — Inversion command (line ~102):
+    Before:
+        writecommand(ST7789_INVON);
+    After:
+        // writecommand(ST7789_INVON);
+
+    Why:
+        Forced inversion was making white appear as black and turning
+        every color into its complement. Commenting it out leaves the
+        panel in normal (non-inverted) mode, which is correct for this
+        TPM408 batch.
+
+3.4  Why these edits work but the flags don't
+---------------------------------------------
+TFT_eSPI's init sequence is a compile-time table. It runs once, at
+tft.init(), before any user code. Whatever values are in that table are
+what the panel sees for the entire session. Runtime writes after init
+either get ignored or overwritten.
+
+So the only reliable way to change color order or inversion is to edit
+the init table directly.
+
+3.5  Also fixed in lib/TFT_eSPI/User_Setup.h
+--------------------------------------------
+    Before:
+        #define TFT_RGB_ORDER TFT_RGB
+    After:
+        // #define TFT_RGB_ORDER TFT_RGB
+        // #define TFT_RGB_ORDER TFT_BGR   (both commented)
+
+    Before:
+        #define TFT_INVERSION_ON
+    After:
+        // #define TFT_INVERSION_ON
+
+Why:
+    These macros conflict with the hardcoded 0x68 in ST7789_Init.h. If
+    the library uses TFT_RGB_ORDER in some code paths and the hardcoded
+    0x68 in others, the result is nondeterministic — colors change
+    between runs. Removing the macros leaves the init table as the
+    single source of truth.
+
+3.6  The remaining valid User_Setup.h
+--------------------------------------
+    #define USER_SETUP_INFO "TPM408_ESP32"
+    #define ST7789_DRIVER
+    #define TFT_WIDTH  240
+    #define TFT_HEIGHT 320
+
+    #define TFT_MISO 19
+    #define TFT_MOSI 23
+    #define TFT_SCLK 18
+    #define TFT_CS    5
+    #define TFT_DC    2
+    #define TFT_RST   4
+    #define TOUCH_CS 32
+
+    #define LOAD_GLCD
+    #define LOAD_FONT2
+    #define LOAD_FONT4
+    #define LOAD_FONT6
+    #define LOAD_FONT7
+    #define LOAD_FONT8
+    #define LOAD_GFXFF
+    #define SMOOTH_FONT
+
+    #define SPI_FREQUENCY        27000000
+    #define SPI_READ_FREQUENCY   20000000
+    #define SPI_TOUCH_FREQUENCY   2500000
+
+No TFT_RGB_ORDER. No TFT_INVERSION_ON. Those are handled by the init
+table instead.
+
+
+================================================================================
+  PART 4 — TOUCH CALIBRATION
+================================================================================
+
+4.1  Symptom
+------------
+Initial touch used generic calData:
+    uint16_t calData[5] = { 285, 3593, 227, 3714, 4 };
+Taps landed 20-200 pixels off. Pressing BTN 1 triggered BTN 5. Pressing
+the physical left side reported right-side coordinates.
+
+4.2  Calibration process
+------------------------
+Flashed a temporary calibration sketch that called:
+    tft.calibrateTouch(calData, TFT_WHITE, TFT_BLACK, 15);
+The library displays 4 crosshair targets; user taps each precisely with
+a stylus. After 4 taps, Serial prints the computed calData array.
+
+4.3  Result
+-----------
+    uint16_t calData[5] = { 361, 3305, 459, 3183, 1 };
+
+Field meanings (landscape):
+    [0] = raw X at left edge
+    [1] = raw X at right edge
+    [2] = raw Y at top edge
+    [3] = raw Y at bottom edge
+    [4] = rotation/swap flags
+
+4.4  Mirror correction
+----------------------
+After calibration, touch was accurate in position but still left-right
+mirrored. Solution: set
+    #define MIRROR_X 0
+    #define MIRROR_Y 0
+in the sketch, and apply in pollTouch():
+    if (MIRROR_X) x = SCREEN_W - 1 - x;
+    if (MIRROR_Y) y = SCREEN_H - 1 - y;
+
+Purpose:
+  Flips the coordinate system to match the physical panel orientation.
+  When the calibration stores raw values in one polarity and the panel
+  expects the opposite, this corrects it without recalibrating.
+
+
+================================================================================
+  PART 5 — LIBRARY PRESERVATION (why lib/TFT_eSPI/)
+================================================================================
+
+Problem:
+  Edits to .pio/libdeps/esp32dev/TFT_eSPI/ were being reverted whenever
+  PlatformIO re-scanned libraries or ran a clean build. The .pio/ folder
+  is a cache and PlatformIO treats library sources there as immutable.
+
+Solution:
+  Copied the entire library into the project:
+      mkdir -p lib
+      cp -r .pio/libdeps/esp32dev/TFT_eSPI lib/TFT_eSPI
+  Edited lib/TFT_eSPI/TFT_Drivers/ST7789_Init.h and
+  lib/TFT_eSPI/User_Setup.h instead.
+
+Verification:
+  After this change, the build log shows:
+      Compiling .pio/build/esp32dev/lib54e/TFT_eSPI/TFT_eSPI.cpp.o
+  The lib54e identifier means PlatformIO is compiling from lib/TFT_eSPI,
+  not from the .pio cache.
+
+Benefit:
+  - Edits survive: pio run -t clean, rm -rf .pio, library updates, and
+    fresh git clones of the project.
+  - Config is version-controlled with the rest of the project.
+
+
+================================================================================
+  PART 6 — FILE-BY-FILE SUMMARY
+================================================================================
+
+SystemConfig.h
+    BUZZER_PIN:  19 -> 13
+
+platformio.ini
+    Removed Adafruit deps, kept TFT_eSPI.
+    Added TFT_eSPI build_flags for pin config (optional; can also be in
+    User_Setup.h).
+
+src/main.cpp
+    Includes: Adafruit -> TFT_eSPI
+    Object:   Adafruit_ST7789 tft(...) -> TFT_eSPI tft()
+    Init:     tft.init(240, 320) + invertDisplay(true) -> tft.init()
+    Colors:   ST77XX_* -> TFT_*
+
+src/display.h
+    Includes: Adafruit_GFX, Adafruit_ST7789 -> TFT_eSPI
+    extern:   Adafruit_ST7789 tft -> TFT_eSPI tft
+    Default color arg:  ST77XX_WHITE -> TFT_WHITE
+
+src/display.cpp
+    All 60+ ST77XX_* -> TFT_*
+    No other changes needed (TFT_eSPI API compatible)
+
+src/game_mechanics.h
+    extern: Adafruit_ST7789 tft -> TFT_eSPI tft (or removed, since
+    display.h already declares it)
+
+src/game_mechanics.cpp
+    ST77XX_CYAN -> TFT_CYAN
+    (Only one occurrence)
+
+lib/TFT_eSPI/User_Setup.h
+    Driver, size, pins unchanged.
+    TFT_RGB_ORDER and TFT_INVERSION_ON commented out.
+
+lib/TFT_eSPI/TFT_Drivers/ST7789_Init.h
+    Line 19:  writedata(TFT_MAD_COLOR_ORDER) -> writedata(0x68)
+    Line 102: writecommand(ST7789_INVON) -> // writecommand(ST7789_INVON)
+
+
+================================================================================
+  PART 7 — FINAL CONFIGURATION AT A GLANCE
+================================================================================
+
+Display:
+    Driver:      ST7789
+    Size:        240 x 320 native (portrait)
+    Orientation: landscape via tft.setRotation(1)
+    MADCTL:      0x68 (MV | MX | BGR)
+    Inversion:   OFF
+    SPI speed:   27 MHz
+
+Touch:
+    Controller:  XPT2046 via TFT_eSPI (TOUCH_CS = GPIO 32)
+    Calibration: { 361, 3305, 459, 3183, 1 }
+    Mirror:      MIRROR_X = 0, MIRROR_Y = 0
+
+Pins:
+    TFT_MISO  19
+    TFT_MOSI  23
+    TFT_SCLK  18
+    TFT_CS     5
+    TFT_DC     2
+    TFT_RST    4
+    TOUCH_CS  32
+    BUZZER    13
+    INPUT_A   21
+    INPUT_B   22
+    INPUT_C   25
+    INPUT_D   26
+    START     27
+    CORRECT_LED   16
+    INCORRECT_LED 17
+
+
+================================================================================
+  PART 8 — VERIFICATION CHECKLIST
+================================================================================
+
+After all changes, verify:
+
+[ ] grep -rn "Adafruit\|ST77XX" src/       -> no output
+[ ] sed -n '19p' lib/TFT_eSPI/TFT_Drivers/ST7789_Init.h
+        -> writedata(0x68);  // MX | MV | BGR
+[ ] sed -n '102p' lib/TFT_eSPI/TFT_Drivers/ST7789_Init.h
+        -> // writecommand(ST7789_INVON);
+[ ] grep -n "TFT_RGB_ORDER\|TFT_INVERSION" lib/TFT_eSPI/User_Setup.h
+        -> both lines commented out or absent
+[ ] pio run -t clean && pio run -t upload
+        -> build log shows "lib54e/TFT_eSPI/TFT_eSPI.cpp.o"
+[ ] Screen shows correct colors:
+        RED -> red, GREEN -> green, BLUE -> blue, WHITE -> white
+[ ] Touch reports correct coordinates:
+        Tapping physical left edge reports x < 160
+        Tapping physical right edge reports x > 160
+
+
+================================================================================
+  PART 9 — TROUBLESHOOTING QUICK REFERENCE
+================================================================================
+
+Symptom: Colors swapped (red <-> blue)
+Fix:     ST7789_Init.h line 19 should be 0x68 (BGR bit 0x08 set)
+
+Symptom: Colors negative (red -> cyan, white -> black)
+Fix:     Ensure line 102 (INVON) is commented out
+         Ensure User_Setup.h has no #define TFT_INVERSION_ON
+
+Symptom: Touch mirrored
+Fix:     Adjust MIRROR_X / MIRROR_Y in pollTouch()
+         Try all four combinations:
+             (0,0) (1,0) (0,1) (1,1)
+
+Symptom: Touch inaccurate near edges
+Fix:     Re-run Touch_calibrate
+         Or add INSET = 6 in pollTouch():
+             if (x < INSET) x = INSET;
+             if (y < INSET) y = INSET;
+
+Symptom: Edits to library don't take effect
+Fix:     Verify you edited lib/TFT_eSPI/... not .pio/libdeps/...
+         Run: rm -rf .pio && pio run -t upload
+         Watch for "lib54e/TFT_eSPI" in the build log
+
+Symptom: pio: command not found or resultcallback error
+Fix:     Use VS Code PlatformIO sidebar instead
+         Or: python3 -m platformio run -t upload
+
+
+================================================================================
+  END OF CHANGELOG
+================================================================================

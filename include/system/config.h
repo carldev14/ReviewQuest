@@ -1,227 +1,260 @@
 /**
  * @file system/config.h
- * @brief System configuration singleton class
- * Manages all system-wide configuration, pin definitions, and game state
+ * @brief System configuration singleton — pins, WiFi, game state
  */
 #ifndef SYSTEM_CONFIG_H
 #define SYSTEM_CONFIG_H
+
+// ==========================================
+// BUILD PROFILE
+// ==========================================
+// Set REVIEWQUEST_DEBUG via platformio.ini:
+//     build_flags = -DREVIEWQUEST_DEBUG=1   (debug)
+//     build_flags = -DREVIEWQUEST_DEBUG=0   (production)
+//
+// Safe fallback: production. Override only when you want logs.
+
+#ifndef REVIEWQUEST_DEBUG
+#define REVIEWQUEST_DEBUG 0
+#endif
+
+#if REVIEWQUEST_DEBUG
+
+    #define RQ_LOG(x)              do { Serial.print(x);   } while (0)
+    #define RQ_LOGLN(x)            do { Serial.println(x); } while (0)
+    #define RQ_LOGF(...)           do { Serial.printf(__VA_ARGS__); } while (0)
+    #define RQ_SERIAL_BEGIN(baud)  Serial.begin(baud)
+
+#else
+
+    #define RQ_LOG(x)              do {} while (0)
+    #define RQ_LOGLN(x)            do {} while (0)
+    #define RQ_LOGF(...)           do {} while (0)
+    #define RQ_SERIAL_BEGIN(baud)  do {} while (0)
+
+#endif
 
 #include <Arduino.h>
 #include <vector>
 #include <algorithm>
 
-// Undefine any conflicting macros
-#ifdef TFT_CS
-#undef TFT_CS
-#endif
-#ifdef TFT_DC
-#undef TFT_DC
-#endif
-#ifdef TFT_RST
-#undef TFT_RST
-#endif
-
 class SystemConfig
 {
 public:
     // ==========================================
-    // SINGLETON INSTANCE
+    // SINGLETON
     // ==========================================
-
-    /**
-     * @brief Get the single instance of SystemConfig
-     * @return Reference to the singleton instance
-     */
     static SystemConfig &get();
 
     // ==========================================
-    // INITIALIZATION METHODS
+    // LIFECYCLE
     // ==========================================
-
-    /**
-     * @brief Initialize the system configuration
-     * Sets up pin modes, default values, etc.
-     */
     void initialize();
-
-    /**
-     * @brief Reset all values to initial state
-     */
     void initialValues();
 
-
-    /**
-     * @brief Print all questions to Serial for debugging
-     */
+    // ==========================================
+    // HELPERS
+    // ==========================================
     void ListQuestions();
-
-    /**
-     * @brief Get the maximum number of players allowed (limited to 5)
-     * @return int Maximum player count (min of playerScores.size() or 5)
-     */
     int getMaxPlayer();
 
     // ==========================================
     // PIN DEFINITIONS
     // ==========================================
 
-    //** ACTUATORS */
-    static constexpr int CORRECT_LED = 16;   ///< LED pin for correct answer feedback
-    static constexpr int INCORRECT_LED = 17; ///< LED pin for incorrect answer feedback
-    static constexpr int BUZZER_PIN = 19;    ///< Buzzer pin for sound effects
+    // Actuators
+    static constexpr int CORRECT_LED   = 16;
+    static constexpr int INCORRECT_LED = 17;
+    static constexpr int BUZZER_PIN    = 21;
 
-    //** INPUTS */
-    static constexpr int INPUT_A = 21;           ///< Button A pin
-    static constexpr int INPUT_B = 22;           ///< Button B pin
-    static constexpr int INPUT_C = 25;           ///< Button C pin
-    static constexpr int INPUT_D = 26;           ///< Button D pin
-    static constexpr int INPUT_START = 27;       ///< Start button pin
+    // Physical inputs (A/B/C/D handled by touch)
+    static constexpr int INPUT_START = 22;
 
-    // ==========================================
-    // TFT DISPLAY PINS
-    // ==========================================
-    static constexpr int TFT_CS = 5;  ///< TFT Chip Select pin
-    static constexpr int TFT_RST = 4; ///< TFT Reset pin
-    static constexpr int TFT_DC = 2;  ///< TFT Data/Command pin (connected to 'A0' pin)
+    // TFT + Touch pins live in lib/TFT_eSPI/User_Setup.h:
+    //   MISO 19  MOSI 23  SCLK 18  CS 5  DC 2  RST 4  TOUCH_CS 32
+    // GPIO 19 is shared between TFT SDO and Touch DO.
+    // Touch IRQ (33) is unused — TFT_eSPI polls over SPI.
 
     // ==========================================
-    // WIFI CONFIGURATION
+    // COLOR PALETTE
     // ==========================================
-    String wifiSSID = "ReviewQuest: ESP32";
-    String wifiPassword = "12345678";
-    String mdnsHostname = "reviewquest";
-    int dnsPort = 53;
+    static constexpr uint16_t COLOR_DEEP_INDIGO   = 0x6B4F;
+    static constexpr uint16_t COLOR_NEBULA_PURPLE = 0x7C9F;
+    static constexpr uint16_t COLOR_STARLIGHT     = 0x4C6B;
+    static constexpr uint16_t COLOR_CARD_BG       = 0x1082;
+    static constexpr uint16_t COLOR_CARD_BG_DIM   = 0x4208;
 
     // ==========================================
     // DATA STRUCTURES
     // ==========================================
 
-    // =====
-    // Sessions (Questions, Players, and Title)
-    String sessionTitle = "";
-
-    /**
-     * @brief Question structure containing all question data
-     */
     struct Question
     {
-        int id;              ///< Unique question ID
-        String text;         ///< Question text
-        String optionA;      ///< Option A text
-        String optionB;      ///< Option B text
-        String optionC;      ///< Option C text
-        String optionD;      ///< Option D text
-        char initialCharAns; ///< Correct answer character (A, B, C, or D)
+        int    id;
+        String text;
+        String optionA;
+        String optionB;
+        String optionC;
+        String optionD;
+        char   initialCharAns;
 
-        // Store original options for reset
-        String originalOptionA; ///< Original Option A (for hint reset)
-        String originalOptionB; ///< Original Option B (for hint reset)
-        String originalOptionC; ///< Original Option C (for hint reset)
-        String originalOptionD; ///< Original Option D (for hint reset)
-        bool hintUsed = false;  ///< Flag to track if hint was used on this question
+        // Hint support — store originals for restore
+        String originalOptionA;
+        String originalOptionB;
+        String originalOptionC;
+        String originalOptionD;
+        bool   hintUsed = false;
     };
 
-    /**
-     * @brief Player score structure tracking individual player data
-     */
     struct PlayerScore
     {
-        String name;       ///< Player's name
-        int score;         ///< Player's current score
-        bool isEliminated; ///< True if player has been eliminated
+        String name;
+        int    score;
+        bool   isEliminated;
     };
 
-    /**
-     * @brief Display state enumeration for UI flow control
-     */
     enum DisplayState
     {
-        SHOW_SPLASH,       ///< Show splash screen
-        SHOW_START,        ///< Show start screen
-        SHOW_QUESTION,     ///< Show current question
-        SHOW_CORRECT,      ///< Show correct feedback
-        SHOW_INCORRECT,    ///< Show incorrect feedback
-        SHOW_COMPLETE,     ///< Show completion/game over screen
-        SHOW_LEADERBOARD,  ///< Show leaderboard
-        SHOW_RESTART_GAME, ///< Show restart confirmation,
+        SHOW_SPLASH,
+        SHOW_START,
+        SHOW_QUESTION,
+        SHOW_CORRECT,
+        SHOW_INCORRECT,
+        SHOW_COMPLETE,
+        SHOW_LEADERBOARD,
+        SHOW_RESTART_GAME,
         SHOW_UPLOADED,
         SHOW_CREDENTIALS,
         SHOW_NEW_SESSION,
         SHOW_NO_CURRENT_SESSION,
     };
 
-    /**
-     * @brief Elimination reason enumeration for tracking why a player was eliminated
-     */
     enum EliminationReason
     {
-        ELIM_DEDUCT_POINTS,    ///< Eliminated due to points reaching zero
-        ELIM_PENALTY_QUESTION, ///< Eliminated due to failing penalty questions
-        ELIM_TASK_FAILED,      ///< Eliminated due to task failure
-        ELIM_SACRIFICIAL_CONS, ///< Eliminated as a sacrifice (savior took the fall)
-        ELIM_REFUSE_TO_REVIVE, ///< Eliminated because no one would save them
-        ELIM_UNKNOWN           ///< Elimination reason unknown
+        ELIM_DEDUCT_POINTS,
+        ELIM_PENALTY_QUESTION,
+        ELIM_TASK_FAILED,
+        ELIM_SACRIFICIAL_CONS,
+        ELIM_REFUSE_TO_REVIVE,
+        ELIM_UNKNOWN
     };
 
     // ==========================================
-    // GAME VARIABLES
+    // WIFI / SESSION
+    // ==========================================
+    String wifiSSID      = "ReviewQuest: ESP32";
+    String wifiPassword  = "12345678";
+    String mdnsHostname  = "reviewquest";
+    int    dnsPort       = 53;
+    bool   isSessionEnabled = false;
+
+    // ==========================================
+    // GAME DATA
+    // ==========================================
+    String sessionTitle = "";
+
+    std::vector<Question>    questionList;
+    std::vector<int>         questionOrder;
+    std::vector<int>         questionOptionOrder;
+    std::vector<int>         playerOrder;
+    std::vector<PlayerScore> playerScores;
+
+    // ==========================================
+    // GAME STATE — cursors
+    // ==========================================
+    int currentQuestionPos = 0;
+    int currentPlayerPos   = 0;
+    int nextQuestionId     = 1;
+    int currentIndex       = 0;
+    int overallScore       = 0;
+
+    // ==========================================
+    // GAME STATE — actors
+    // ==========================================
+    String currentPlayerName = "";
+    String saviorPlayerName  = "";
+
+    // ==========================================
+    // GAME STATE — flags
+    // ==========================================
+    bool endGameRunOnce = false;
+    bool isLuckActive   = false;
+    bool isNewSesion    = false;
+
+    // ==========================================
+    // GAME STATE — revive flow
+    // ==========================================
+    int  selectedSaviorIndex = 0;
+    bool revivingProcess     = false;
+    bool refuseToRevive      = false;
+
+    // ==========================================
+    // GAME STATE — answer tracking
+    // ==========================================
+    bool answered       = false;
+    char selectedAnswer = ' ';
+
+    // ==========================================
+    // DISPLAY STATE
+    // ==========================================
+    DisplayState      displayState      = SHOW_START;
+    EliminationReason eliminationReason = ELIM_UNKNOWN;
+
+    unsigned long       stateStartTime    = 0;
+    const unsigned long FEEDBACK_DURATION = 1500;
+
+    // ==========================================
+    // TOUCH GEOMETRY — written by display, read by inputs
     // ==========================================
 
-    // Question management
-    std::vector<Question> questionList;    ///< Master list of all questions
-    std::vector<int> questionOrder;        ///< Shuffled question indices (order of play)
-    std::vector<int> questionOptionOrder;  ///< Shuffled question option indices
-    std::vector<int> playerOrder;          ///< Shuffled player indices (turn order)
-    std::vector<PlayerScore> playerScores; ///< Per-player scores in RAM
+    // Answer bands (question screen)
+    static constexpr int CHOICE_COUNT = 4;
+    int choiceBandY[CHOICE_COUNT] = {0, 0, 0, 0};
+    int choiceBandH = 26;
 
-    // State tracking
-    int currentQuestionPos = 0;  ///< Current position in questionOrder
-    int currentPlayerPos = 0;    ///< Current position in playerOrder
-    int nextQuestionId = 1;      ///< Next available question ID for new questions
-    int currentIndex = 0;        ///< Original question index (unshuffled)
-    int overallScore = 0;        ///< Overall score (kept for display)
-    bool endGameRunOnce = false; ///< Flag to prevent end-game from running multiple times
-    bool isLuckActive = false;   ///< Flag to prevent timer interference during luck events
-    bool isNewSesion = false;
+    // Savior list rows
+    static constexpr int MAX_SAVIOR_ROWS = 4;
+    int saviorRowY[MAX_SAVIOR_ROWS] = {0, 0, 0, 0};
+    int saviorRowH   = 40;
+    int saviorRowCount = 0;
 
-    // Strings
-    String currentPlayerName = ""; ///< Name of the currently active player
-    String saviorPlayerName = "";  ///< Name of the player who saves/revives another
+    // Savior button bar
+    int saviorBtnBarY   = 0;
+    int saviorBtnElectX = 0;
+    int saviorBtnNextX  = 0;
+    int saviorBtnSkipX  = 0;
+    int saviorBtnW      = 0;
+    int saviorBtnH      = 0;
 
-    // Revive states
-    int selectedSaviorIndex = 0;  ///< Currently selected savior index in the list
-    bool revivingProcess = false; ///< True when reviving process is active
-    bool refuseToRevive = false;  ///< True if current player refuses to save another
+    // New session buttons
+    int newSessionYesX = 0;
+    int newSessionNoX  = 0;
+    int newSessionBtnY = 0;
+    int newSessionBtnW = 0;
+    int newSessionBtnH = 0;
 
-    // Display state
-    DisplayState displayState = SHOW_START;             ///< Current display state
-    EliminationReason eliminationReason = ELIM_UNKNOWN; ///< Reason for last elimination
+    // Legacy footer zones (kept for compatibility)
+    int saviorFooterY      = 210;
+    int saviorFooterSplit1 = 106;
+    int saviorFooterSplit2 = 213;
 
-    unsigned long stateStartTime = 0;             ///< Timestamp when current state started
-    const unsigned long FEEDBACK_DURATION = 1500; ///< Duration to show feedback (1.5 seconds)
-
-    // Answer tracking
-    bool answered = false;     ///< True if current question has been answered
-    char selectedAnswer = ' '; ///< The selected answer character (A, B, C, D)
-
-    // Debounce
-    unsigned long lastDebounceTime = 0; ///< Last debounce timestamp
-    unsigned long debounceDelay = 200;  ///< Debounce delay in milliseconds
+    // ==========================================
+    // DEBOUNCE (physical START button)
+    // ==========================================
+    unsigned long lastDebounceTime = 0;
+    unsigned long debounceDelay    = 200;
 
 private:
     // ==========================================
-    // PRIVATE CONSTRUCTOR & DESTRUCTOR (Singleton)
+    // CONSTRUCTOR & DESTRUCTOR
     // ==========================================
+    SystemConfig()  = default;
+    ~SystemConfig() = default;
 
-    SystemConfig() = default;  ///< Private constructor (singleton)
-    ~SystemConfig() = default; ///< Private destructor (singleton)
-
-    // Delete copy constructor and assignment operator
-    SystemConfig(const SystemConfig &) = delete;
+    SystemConfig(const SystemConfig &)            = delete;
     SystemConfig &operator=(const SystemConfig &) = delete;
 
-    // Private member variables
-    bool initialized = false; ///< Flag to track if config has been initialized
+    bool initialized = false;
 };
 
 #endif // SYSTEM_CONFIG_H
