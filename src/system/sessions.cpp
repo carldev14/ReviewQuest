@@ -264,10 +264,11 @@ void Session::_handleStartSessionBody(AsyncWebServerRequest *request, uint8_t *d
                 for (JsonObject pObj : players)
                 {
                     SystemConfig::PlayerScore p;
-                    p.name = pObj["name"].as<String>();
-                    p.score = pObj["score"].as<int>();
-                    p.isEliminated = pObj["isEliminated"].as<bool>();
-                    config.playerScores.push_back(p);
+                    p.name = pObj["name"].as<String>();               // Player name
+                    p.score = pObj["score"].as<int>();                // Player score
+                    p.isEliminated = pObj["isEliminated"].as<bool>(); // Player isEliminated?
+                    p.pairedUpWith = pObj["pairedUpWith"] | "Solo";   // Player paired up with?
+                    config.playerScores.push_back(p);                 // Push the object data
 
                     Serial.printf("   👤 %s | Score: %d | %s\n",
                                   p.name.c_str(),

@@ -124,674 +124,6 @@ void DisplayOutputs::showRestartGameScreen()
 }
 
 // ==========================================
-// QUESTION SCREEN
-// ==========================================
-
-void DisplayOutputs::showQuestionScreen(int index)
-{
-    if (index >= (int)config.questionList.size())
-    {
-        showCompletionScreen();
-        return;
-    }
-
-    SystemConfig::Question &q = config.questionList[index];
-    config.answered = false;
-    config.selectedAnswer = ' ';
-    config.displayState = SystemConfig::SHOW_QUESTION;
-
-    tft.fillScreen(TFT_BLACK);
-
-    const int PAD_X = 10;
-    const int CONTENT_X = PAD_X;
-    const int CONTENT_W = SCREEN_W - 2 * PAD_X;
-
-    // Header — player left, instruction centred, Q counter right
-    tft.setTextSize(1);
-    tft.setTextColor(config.COLOR_DEEP_INDIGO, TFT_BLACK);
-
-    // Build the strings first so we can measure them
-    int playerScore = getPlayerScore(config.currentPlayerName);
-
-    char playerBuf[32];
-    snprintf(playerBuf, sizeof(playerBuf), "%s: %d pts",
-             config.currentPlayerName.c_str(), playerScore);
-
-    char qCounter[16];
-    snprintf(qCounter, sizeof(qCounter), "Q%d/%d",
-             index + 1, (int)config.questionList.size());
-
-    const char *instruction = "Tap an answer to select";
-
-    // Zone boundaries
-    const int playerLeft = CONTENT_X;
-    const int playerRight = playerLeft + tft.textWidth(playerBuf);
-
-    const int qRight = SCREEN_W - PAD_X;
-    const int qLeft = qRight - tft.textWidth(qCounter);
-
-    // Centre the instruction in the gap between the two
-    const int gapMid = (playerRight + qLeft) / 2;
-    const int instrX = gapMid - (tft.textWidth(instruction) / 2);
-
-    // Draw — left, centre, right
-    tft.setCursor(playerLeft, 6);
-    tft.print(playerBuf);
-
-    tft.setCursor(instrX, 6);
-    tft.print(instruction);
-
-    tft.setCursor(qLeft, 6);
-    tft.print(qCounter);
-
-    tft.drawLine(CONTENT_X, 20, SCREEN_W - PAD_X, 20, config.COLOR_DEEP_INDIGO);
-
-    // Question text — wrapped, size 2, white
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-
-    int qY = 28;
-    wrapText(q.text, CONTENT_X, qY, CONTENT_W, 96, 18, TFT_WHITE, 2);
-
-    // Answer bands — 4 rows, 32 px tall, 38 px pitch
-    const int gap = 10;
-    const int bandY = qY + gap;
-    const int rowH = 32;
-    const int pitch = 38;
-
-    config.choiceBandH = rowH - 4;
-    config.choiceBandY[0] = bandY + 0 * pitch;
-    config.choiceBandY[1] = bandY + 1 * pitch;
-    config.choiceBandY[2] = bandY + 2 * pitch;
-    config.choiceBandY[3] = bandY + 3 * pitch;
-
-    auto drawChoice = [&](int i, char letter, const String &opt, bool removed)
-    {
-        RowStyle s;
-        s.bg = removed ? config.COLOR_CARD_BG_DIM : config.COLOR_CARD_BG;
-        s.border = config.COLOR_NEBULA_PURPLE;
-        s.prefixColor = removed ? TFT_DARKGREY : config.COLOR_DEEP_INDIGO;
-        s.textColor = removed ? TFT_DARKGREY : 0xCE79;
-
-        String prefix = String(letter) + ".";
-        String body = removed ? "(removed)" : opt;
-
-        drawListRow(config.choiceBandY[i], prefix, body, rowH, s);
-    };
-
-    drawChoice(0, 'A', q.optionA, q.optionA == "[REMOVED]");
-    drawChoice(1, 'B', q.optionB, q.optionB == "[REMOVED]");
-    drawChoice(2, 'C', q.optionC, q.optionC == "[REMOVED]");
-    drawChoice(3, 'D', q.optionD, q.optionD == "[REMOVED]");
-}
-
-// ==========================================
-// ANSWER BAND RENDERER
-// ==========================================
-
-void DisplayOutputs::drawListRow(int y, const String &prefix,
-                                 const String &text, int rowH,
-                                 const RowStyle &style)
-{
-    const int PAD_X = 10;
-    const int x = PAD_X;
-    const int w = SCREEN_W - 2 * PAD_X;
-    const int h = rowH - 4;
-
-    uint16_t bg = style.selected ? style.selectBg : style.bg;
-    uint16_t prefixColor = style.selected ? TFT_WHITE : style.prefixColor;
-    uint16_t textColor = style.selected ? TFT_WHITE : style.textColor;
-
-    tft.fillRect(x, y, w, h, bg);
-    tft.drawRect(x, y, w, h, style.border);
-
-    // Prefix (A. / B. / C. / D.)
-    tft.setTextSize(style.textSize == TextSize::Small ? 1 : 2);
-    tft.setTextColor(prefixColor, bg);
-    tft.setCursor(x + 8, y + 6);
-    tft.print(prefix);
-
-    int prefixW = tft.textWidth(prefix);
-
-    // Body text
-    tft.setTextColor(textColor, bg);
-    tft.setCursor(x + 8 + prefixW + 6, y + 6);
-
-    // Truncate with ellipsis only if the body overflows the card
-    String shown = text;
-    const int maxWidth = w - (8 + prefixW + 6) - 8;
-    while ((int)tft.textWidth(shown) > maxWidth && shown.length() > 3)
-    {
-        shown = shown.substring(0, shown.length() - 4) + "...";
-    }
-    tft.print(shown);
-}
-
-// ==========================================
-// FEEDBACK SCREENS
-// ==========================================
-
-void DisplayOutputs::showCorrectFeedbackScreen()
-{
-    tft.fillScreen(TFT_BLACK);
-
-    const int PAD_X = 10;
-    const int CONTENT_X = PAD_X;
-    const int CONTENT_W = SCREEN_W - 2 * PAD_X;
-
-    // Title
-    tft.setTextSize(2);
-    tft.setTextColor(SystemConfig::COLOR_DEEP_INDIGO, TFT_BLACK);
-
-    const char *title = "CORRECT";
-    tft.setCursor(centerX(strlen(title), 2), 16);
-    tft.print(title);
-
-    tft.drawLine(CONTENT_X, 36, SCREEN_W - PAD_X, 36,
-                 SystemConfig::COLOR_DEEP_INDIGO);
-
-    // Status
-    tft.setTextSize(1);
-    tft.setTextColor(TFT_GREEN, TFT_BLACK);
-
-    const char *status = "Answer accepted";
-    tft.setCursor(CONTENT_X, 46);
-    tft.print(status);
-
-    // Message card
-    const int cardY = 66;
-    const int cardH = 130;
-
-    tft.fillRect(CONTENT_X, cardY, CONTENT_W, cardH,
-                 SystemConfig::COLOR_CARD_BG);
-    tft.drawRect(CONTENT_X, cardY, CONTENT_W, cardH, TFT_GREEN);
-
-    // Headline
-    tft.setTextSize(3);
-    tft.setTextColor(TFT_WHITE, SystemConfig::COLOR_CARD_BG);
-
-    const char *line1 = "PASS TO";
-    const char *line2 = "NEXT PLAYER!";
-
-    tft.setCursor(CONTENT_X + 12, cardY + 16);
-    tft.print(line1);
-
-    tft.setCursor(CONTENT_X + 12, cardY + 46);
-    tft.print(line2);
-
-    tft.drawFastHLine(CONTENT_X + 12, cardY + 82,
-                      CONTENT_W - 24, 0x39E7);
-
-    // Stats — overall score + player's score
-    tft.setTextSize(1);
-    tft.setTextColor(SystemConfig::COLOR_STARLIGHT,
-                     SystemConfig::COLOR_CARD_BG);
-    tft.setCursor(CONTENT_X + 12, cardY + 90);
-    tft.print("Score");
-
-    char scoreBuf[16];
-    snprintf(scoreBuf, sizeof(scoreBuf), "%d", config.overallScore);
-    tft.setTextSize(3);
-    tft.setTextColor(SystemConfig::COLOR_NEBULA_PURPLE,
-                     SystemConfig::COLOR_CARD_BG);
-    tft.setCursor(CONTENT_X + 12, cardY + 100);
-    tft.print(scoreBuf);
-
-    tft.setTextSize(1);
-    tft.setTextColor(SystemConfig::COLOR_STARLIGHT,
-                     SystemConfig::COLOR_CARD_BG);
-    tft.setCursor(CONTENT_X + 100, cardY + 90);
-    tft.print(config.currentPlayerName);
-
-    int playerScore = getPlayerScore(config.currentPlayerName);
-    snprintf(scoreBuf, sizeof(scoreBuf), "%d pts", playerScore);
-    tft.setTextSize(3);
-    tft.setTextColor(TFT_WHITE, SystemConfig::COLOR_CARD_BG);
-    tft.setCursor(CONTENT_X + 100, cardY + 100);
-    tft.print(scoreBuf);
-
-    // Footer
-    tft.setTextSize(1);
-    tft.setTextColor(SystemConfig::COLOR_STARLIGHT, TFT_BLACK);
-
-    const char *hint = "Hand the device to the next player";
-    tft.setCursor(CONTENT_X, SCREEN_H - 12);
-    tft.print(hint);
-
-    config.displayState = SystemConfig::SHOW_CORRECT;
-    config.stateStartTime = millis();
-}
-
-void DisplayOutputs::showIncorrectFeedbackScreen()
-{
-    tft.fillScreen(TFT_BLACK);
-
-    const int PAD_X = 10;
-    const int CONTENT_X = PAD_X;
-    const int CONTENT_W = SCREEN_W - 2 * PAD_X;
-
-    // Title
-    tft.setTextSize(2);
-    tft.setTextColor(SystemConfig::COLOR_DEEP_INDIGO, TFT_BLACK);
-
-    const char *title = "INCORRECT";
-    tft.setCursor(centerX(strlen(title), 2), 16);
-    tft.print(title);
-
-    tft.drawLine(CONTENT_X, 36, SCREEN_W - PAD_X, 36,
-                 SystemConfig::COLOR_DEEP_INDIGO);
-
-    // Status
-    tft.setTextSize(1);
-    tft.setTextColor(TFT_RED, TFT_BLACK);
-
-    const char *status = "Answer rejected";
-    tft.setCursor(CONTENT_X, 46);
-    tft.print(status);
-
-    // Message card
-    const int cardY = 66;
-    const int cardH = 120;
-
-    tft.fillRect(CONTENT_X, cardY, CONTENT_W, cardH,
-                 SystemConfig::COLOR_CARD_BG);
-    tft.drawRect(CONTENT_X, cardY, CONTENT_W, cardH, TFT_RED);
-
-    // Player
-    tft.setTextSize(1);
-    tft.setTextColor(SystemConfig::COLOR_STARLIGHT,
-                     SystemConfig::COLOR_CARD_BG);
-    tft.setCursor(CONTENT_X + 12, cardY + 14);
-    tft.print("Player");
-
-    tft.setTextSize(3);
-    tft.setTextColor(TFT_WHITE, SystemConfig::COLOR_CARD_BG);
-    tft.setCursor(CONTENT_X + 12, cardY + 28);
-    tft.print(config.currentPlayerName);
-
-    // Status message
-    tft.setTextSize(1);
-    tft.setTextColor(SystemConfig::COLOR_STARLIGHT,
-                     SystemConfig::COLOR_CARD_BG);
-    tft.setCursor(CONTENT_X + 12, cardY + 68);
-    tft.print("Status");
-
-    tft.setTextSize(2);
-    tft.setTextColor(TFT_RED, SystemConfig::COLOR_CARD_BG);
-    tft.setCursor(CONTENT_X + 12, cardY + 82);
-    tft.print("Still in play.");
-
-    // Footer
-    tft.setTextSize(1);
-    tft.setTextColor(SystemConfig::COLOR_STARLIGHT, TFT_BLACK);
-
-    const char *hint = "You can retry this question";
-    tft.setCursor(CONTENT_X, SCREEN_H - 12);
-    tft.print(hint);
-
-    config.displayState = SystemConfig::SHOW_INCORRECT;
-    config.stateStartTime = millis();
-}
-
-// ==========================================
-// COMPLETION & WINNER
-// ==========================================
-
-void DisplayOutputs::showCompletionScreen()
-{
-    tft.fillScreen(TFT_BLACK);
-
-    const int PAD_X = 10;
-    const int CONTENT_X = PAD_X;
-    const int CONTENT_W = SCREEN_W - 2 * PAD_X;
-
-    // Title
-    tft.setTextSize(2);
-    tft.setTextColor(SystemConfig::COLOR_DEEP_INDIGO, TFT_BLACK);
-
-    const char *title = "ALL DONE!";
-    tft.setCursor(centerX(strlen(title), 2), 16);
-    tft.print(title);
-
-    tft.drawLine(CONTENT_X, 36, SCREEN_W - PAD_X, 36,
-                 SystemConfig::COLOR_DEEP_INDIGO);
-
-    // Status
-    tft.setTextSize(1);
-    tft.setTextColor(SystemConfig::COLOR_NEBULA_PURPLE, TFT_BLACK);
-
-    const char *status = "Quiz finished";
-    tft.setCursor(CONTENT_X, 46);
-    tft.print(status);
-
-    // Stats card — overall score
-    const int cardY = 66;
-    const int cardH = 60;
-
-    tft.fillRect(CONTENT_X, cardY, CONTENT_W, cardH,
-                 SystemConfig::COLOR_CARD_BG);
-    tft.drawRect(CONTENT_X, cardY, CONTENT_W, cardH,
-                 SystemConfig::COLOR_NEBULA_PURPLE);
-
-    tft.setTextSize(1);
-    tft.setTextColor(SystemConfig::COLOR_STARLIGHT,
-                     SystemConfig::COLOR_CARD_BG);
-    tft.setCursor(CONTENT_X + 12, cardY + 10);
-    tft.print("Overall");
-
-    char scoreBuf[32];
-    snprintf(scoreBuf, sizeof(scoreBuf), "%d / %d",
-             config.overallScore, (int)config.questionList.size());
-
-    tft.setTextSize(3);
-    tft.setTextColor(TFT_WHITE, SystemConfig::COLOR_CARD_BG);
-    tft.setCursor(CONTENT_X + 12, cardY + 24);
-    tft.print(scoreBuf);
-
-    // Winner card
-    const int winY = 136;
-    const int winH = 66;
-
-    tft.fillRect(CONTENT_X, winY, CONTENT_W, winH,
-                 SystemConfig::COLOR_CARD_BG);
-    tft.drawRect(CONTENT_X, winY, CONTENT_W, winH, 0xFE60);
-
-    int highestScore = 0;
-    String topPlayer = "";
-    for (int i = 0; i < (int)config.playerScores.size(); i++)
-    {
-        if (config.playerScores[i].score > highestScore)
-        {
-            highestScore = config.playerScores[i].score;
-            topPlayer = config.playerScores[i].name;
-        }
-    }
-
-    tft.setTextSize(1);
-    tft.setTextColor(SystemConfig::COLOR_STARLIGHT,
-                     SystemConfig::COLOR_CARD_BG);
-    tft.setCursor(CONTENT_X + 12, winY + 10);
-    tft.print("Winner");
-
-    if (topPlayer != "")
-    {
-        tft.setTextSize(2);
-        tft.setTextColor(0xFE60, SystemConfig::COLOR_CARD_BG);
-        tft.setCursor(CONTENT_X + 12, winY + 24);
-        tft.print(topPlayer);
-
-        char ptsBuf[16];
-        snprintf(ptsBuf, sizeof(ptsBuf), "%d pts", highestScore);
-        tft.setTextSize(3);
-        tft.setTextColor(TFT_WHITE, SystemConfig::COLOR_CARD_BG);
-        tft.setCursor(CONTENT_X + 12, winY + 44);
-        tft.print(ptsBuf);
-    }
-    else
-    {
-        tft.setTextSize(2);
-        tft.setTextColor(TFT_RED, SystemConfig::COLOR_CARD_BG);
-        tft.setCursor(CONTENT_X + 12, winY + 28);
-        tft.print("No winner found");
-    }
-
-    // Footer
-    tft.setTextSize(1);
-    tft.setTextColor(SystemConfig::COLOR_STARLIGHT, TFT_BLACK);
-
-    const char *hint = "Press START for leaderboard";
-    tft.setCursor(CONTENT_X, SCREEN_H - 12);
-    tft.print(hint);
-
-    config.displayState = SystemConfig::SHOW_COMPLETE;
-}
-
-// ==========================================
-// LEADERBOARD
-// ==========================================
-
-void DisplayOutputs::showLeaderboardScreen()
-{
-    helper.sortPlayersByScore();
-    tft.fillScreen(TFT_BLACK);
-
-    if (config.playerScores.empty())
-    {
-        tft.setTextSize(2);
-        tft.setTextColor(TFT_RED, TFT_BLACK);
-        const char *msg = "No scores available.";
-        tft.setCursor(centerX(strlen(msg), 2), 110);
-        tft.print(msg);
-        config.displayState = SystemConfig::SHOW_LEADERBOARD;
-        return;
-    }
-
-    // Title bar — Deep Indigo banner with purple underline
-    tft.fillRect(0, 0, SCREEN_W, 32, SystemConfig::COLOR_DEEP_INDIGO);
-    tft.setTextSize(2);
-    tft.setTextColor(TFT_WHITE, SystemConfig::COLOR_DEEP_INDIGO);
-    const char *title = "LEADERBOARD";
-    tft.setCursor(centerX(strlen(title), 2), 5);
-    tft.print(title);
-
-    tft.drawFastHLine(0, 32, SCREEN_W, SystemConfig::COLOR_NEBULA_PURPLE);
-    tft.drawFastHLine(0, 33, SCREEN_W, 0x5A6F);
-
-    // Row layout
-    const int rowTop = 44;
-    const int rowH = 36;
-    const int maxRows = (SCREEN_H - rowTop - 24) / rowH;
-
-    for (int i = 0; i < config.getMaxPlayer() && i < maxRows; i++)
-    {
-        const auto &player = config.playerScores[i];
-        const int yPos = rowTop + i * rowH;
-
-        const bool isTop3 = (i < 3);
-        const bool isCurrent = (player.name == config.currentPlayerName);
-        const bool isEliminated = player.isEliminated;
-
-        uint16_t medalColor = rankColorFor(i);
-
-        // Subtle medal-tinted backgrounds for top 3, Card BG for current
-        uint16_t rowBg = TFT_BLACK;
-
-        if (isTop3 && !isEliminated)
-        {
-            rowBg = (i == 0)   ? 0x2965  // dark gold
-                    : (i == 1) ? 0x39E7  // dark silver
-                               : 0x3186; // dark bronze
-        }
-        else if (isCurrent)
-        {
-            rowBg = SystemConfig::COLOR_CARD_BG;
-        }
-
-        if (isTop3 || isCurrent)
-        {
-            tft.fillRect(4, yPos - 2, SCREEN_W - 8, rowH - 2, rowBg);
-        }
-
-        // Gold border ring around #1
-        if (i == 0 && !isEliminated)
-        {
-            tft.drawRect(4, yPos - 2, SCREEN_W - 8, rowH - 2, medalColor);
-        }
-
-        // Medal icon for top 3, plain rank number otherwise
-        if (isTop3 && !isEliminated)
-        {
-            drawMedalIcon(22, yPos + rowH / 2 - 2, medalColor);
-        }
-        else
-        {
-            tft.setTextSize(2);
-            tft.setTextColor(isEliminated ? TFT_RED : TFT_LIGHTGREY, rowBg);
-            tft.setCursor(18, yPos + 8);
-            tft.printf("%d", i + 1);
-        }
-
-        // Rank label ("1st", "2nd", "3rd" — only for top 3)
-        tft.setTextSize(2);
-        uint16_t rankTextColor = isEliminated ? TFT_RED
-                                 : isTop3     ? medalColor
-                                              : TFT_LIGHTGREY;
-        tft.setTextColor(rankTextColor, rowBg);
-
-        const char *rankLbl = (i == 0)   ? "1st"
-                              : (i == 1) ? "2nd"
-                              : (i == 2) ? "3rd"
-                                         : nullptr;
-
-        if (rankLbl)
-        {
-            tft.setCursor(44, yPos + 8);
-            tft.print(rankLbl);
-        }
-
-        // Player name (truncated with "." if >10 chars)
-        uint16_t nameColor = isEliminated ? TFT_RED
-                             : isCurrent  ? TFT_WHITE
-                             : isTop3     ? TFT_WHITE
-                                          : TFT_LIGHTGREY;
-
-        String name = player.name.isEmpty() ? "Player" : player.name;
-        if (name.length() > 10)
-            name = name.substring(0, 9) + ".";
-
-        tft.setTextColor(nameColor, rowBg);
-        tft.setCursor(100, yPos + 8);
-        tft.print(name.c_str());
-
-        // Score — right-aligned
-        tft.setTextSize(2);
-        tft.setTextColor(isEliminated ? TFT_RED : TFT_WHITE, rowBg);
-
-        char scoreBuf[8];
-        snprintf(scoreBuf, sizeof(scoreBuf), "%d", player.score);
-        int scoreW = strlen(scoreBuf) * 12; // size 2 = 12 px/char
-        int scoreX = SCREEN_W - 10 - scoreW;
-
-        if (isEliminated)
-            scoreX -= 46;
-
-        tft.setCursor(scoreX, yPos + 8);
-        tft.print(scoreBuf);
-
-        // Eliminated tag
-        if (isEliminated)
-        {
-            tft.setTextSize(1);
-            tft.setTextColor(TFT_RED, rowBg);
-            tft.setCursor(SCREEN_W - 44, yPos + 12);
-            tft.print("(Elim)");
-        }
-    }
-
-    // Overflow footer — show count of hidden players
-    const int totalPlayers = static_cast<int>(config.playerScores.size());
-    if (totalPlayers > maxRows)
-    {
-        tft.setTextSize(1);
-        tft.setTextColor(TFT_YELLOW, TFT_BLACK);
-        tft.setCursor(10, SCREEN_H - 12);
-        tft.printf("+%d more players", totalPlayers - maxRows);
-    }
-
-    // Prompt
-    tft.setTextSize(1);
-    tft.setTextColor(SystemConfig::COLOR_STARLIGHT, TFT_BLACK);
-    const char *prompt = "Press start to continue";
-    tft.setCursor(centerX(strlen(prompt), 2), SCREEN_H - 22);
-    tft.print(prompt);
-
-    config.displayState = SystemConfig::SHOW_LEADERBOARD;
-}
-
-// ==========================================
-// LEADERBOARD ICONS
-// ==========================================
-
-void DisplayOutputs::drawMedalIcon(int cx, int cy, uint16_t medalColor)
-{
-    // Brighter highlight for top-left arc
-    uint8_t hr = (medalColor >> 11) & 0x1F;
-    uint8_t hg = (medalColor >> 5) & 0x3F;
-    uint8_t hb = medalColor & 0x1F;
-    hr = (hr + 4) > 0x1F ? 0x1F : hr + 4;
-    hg = (hg + 8) > 0x3F ? 0x3F : hg + 8;
-    hb = (hb + 4) > 0x1F ? 0x1F : hb + 4;
-    uint16_t highlight = (hr << 11) | (hg << 5) | hb;
-
-    // Darker shadow for bottom-right arc
-    uint8_t sr = (medalColor >> 11) & 0x1F;
-    uint8_t sg = (medalColor >> 5) & 0x3F;
-    uint8_t sb = medalColor & 0x1F;
-    sr = (sr > 4) ? sr - 4 : 0;
-    sg = (sg > 8) ? sg - 8 : 0;
-    sb = (sb > 4) ? sb - 4 : 0;
-    uint16_t shadow = (sr << 11) | (sg << 5) | sb;
-
-    // Outer black ring
-    tft.fillCircle(cx, cy, 14, TFT_BLACK);
-
-    // Main medal body
-    tft.fillCircle(cx, cy, 13, medalColor);
-
-    // Highlight arc (top-left, offset -1)
-    tft.drawCircle(cx - 1, cy - 1, 11, highlight);
-
-    // Shadow arc (bottom-right, offset +1)
-    tft.drawCircle(cx + 1, cy + 1, 11, shadow);
-
-    // White 5-point star emblem
-    const int R = 8; // outer radius
-    const int r = 3; // inner radius
-
-    for (int a = 0; a < 360; a += 72)
-    {
-        float p1 = (a - 90) * DEG_TO_RAD;
-        float p2 = (a - 90 + 36) * DEG_TO_RAD;
-        float p3 = (a - 90 + 72) * DEG_TO_RAD;
-
-        tft.fillTriangle(
-            cx + R * cos(p1), cy + R * sin(p1),
-            cx + r * cos(p2), cy + r * sin(p2),
-            cx + R * cos(p3), cy + R * sin(p3),
-            TFT_WHITE);
-    }
-}
-
-uint16_t DisplayOutputs::rankColorFor(int rankIndex)
-{
-    switch (rankIndex)
-    {
-    case 0:
-        return 0xFE60; // gold   (RGB565: R=31, G=56, B=0)
-    case 1:
-        return 0xC618; // silver (RGB565: R=24, G=48, B=24)
-    case 2:
-        return 0xCB22; // bronze (RGB565: R=25, G=36, B=8)
-    default:
-        return TFT_WHITE;
-    }
-}
-
-String DisplayOutputs::rankLabelFor(int rankIndex)
-{
-    switch (rankIndex)
-    {
-    case 0:
-        return "Top 1";
-    case 1:
-        return "Top 2";
-    case 2:
-        return "Top 3";
-    default:
-        return String(rankIndex + 1) + ".";
-    }
-}
-
-// ==========================================
 // SESSION SCREENS
 // ==========================================
 
@@ -912,14 +244,14 @@ void DisplayOutputs::showNoCurrentSessionScreen()
     if (cfg.isSessionEnabled)
     {
         tft.setTextColor(TFT_GREEN, TFT_BLACK);
-        const char *status = "WiFi is active — ready to receive";
+        const char *status = "WiFi is active; ready to receive";
         tft.setCursor(CONTENT_X, 34);
         tft.print(status);
     }
     else
     {
         tft.setTextColor(SystemConfig::COLOR_NEBULA_PURPLE, TFT_BLACK);
-        const char *status = "WiFi is off — no session uploaded";
+        const char *status = "WiFi is off; no session uploaded";
         tft.setCursor(CONTENT_X, 34);
         tft.print(status);
     }
@@ -1125,6 +457,816 @@ void DisplayOutputs::showStartSessionScreen()
 }
 
 // ==========================================
+// PLAYER ROSTER
+// ==========================================
+
+void DisplayOutputs::showListPlayers()
+{
+    tft.fillScreen(TFT_BLACK);
+
+    const int PAD_X = 10;
+    const int CONTENT_X = PAD_X;
+    const int CONTENT_W = SCREEN_W - 2 * PAD_X;
+
+    // Title
+    tft.setTextSize(2);
+    tft.setTextColor(SystemConfig::COLOR_DEEP_INDIGO, TFT_BLACK);
+
+    const char *title = "PLAYERS";
+    tft.setCursor(centerX(strlen(title), 2), 10);
+    tft.print(title);
+
+    tft.drawLine(CONTENT_X, 30, SCREEN_W - PAD_X, 30,
+                 SystemConfig::COLOR_DEEP_INDIGO);
+
+    // Player count subtitle
+    tft.setTextSize(1);
+    tft.setTextColor(SystemConfig::COLOR_NEBULA_PURPLE, TFT_BLACK);
+
+    char subtitle[32];
+    snprintf(subtitle, sizeof(subtitle), "%d player%s",
+             (int)config.playerScores.size(),
+             config.playerScores.size() == 1 ? "" : "s");
+    tft.setCursor(CONTENT_X, 36);
+    tft.print(subtitle);
+
+    // Row layout
+    const int rowTop = 52;
+    const int rowH = 32;
+    const int maxRows = (SCREEN_H - rowTop - 20) / rowH;
+
+    for (int i = 0; i < (int)config.playerScores.size() && i < maxRows; i++)
+    {
+        const auto &p = config.playerScores[i];
+        const int yPos = rowTop + i * rowH;
+
+        const bool hasPartner = !p.pairedUpWith.isEmpty();
+
+        // Row background — subtle tint for paired players
+        uint16_t rowBg = hasPartner
+                             ? SystemConfig::COLOR_CARD_BG
+                             : TFT_BLACK;
+
+        tft.fillRect(4, yPos - 2, SCREEN_W - 8, rowH - 2, rowBg);
+
+        // Accent bar on the left for paired players
+        if (hasPartner)
+        {
+            tft.fillRect(4, yPos - 2, 3, rowH - 2,
+                         SystemConfig::COLOR_NEBULA_PURPLE);
+        }
+
+        // Slot number
+        tft.setTextSize(2);
+        tft.setTextColor(hasPartner
+                             ? SystemConfig::COLOR_NEBULA_PURPLE
+                             : TFT_LIGHTGREY,
+                         rowBg);
+        tft.setCursor(14, yPos + 8);
+        tft.printf("%d", i + 1);
+
+        // Player name
+        tft.setTextColor(TFT_WHITE, rowBg);
+        tft.setCursor(44, yPos + 8);
+        tft.print(p.name);
+
+        // Partner tag — right-aligned
+        if (hasPartner)
+        {
+            String partner = p.pairedUpWith;
+            if (partner.length() > 8)
+            {
+                partner = partner.substring(0, 7) + ".";
+            }
+
+            String tag = "-> " + partner;
+
+            int tagW = tag.length() * 6; // size 1 = 6 px/char
+            int tagX = SCREEN_W - PAD_X - tagW - 4;
+
+            tft.setTextSize(1);
+            tft.setTextColor(SystemConfig::COLOR_NEBULA_PURPLE, rowBg);
+            tft.setCursor(tagX, yPos + 12);
+            tft.print(tag);
+        }
+    }
+
+    // Overflow footer — show count of hidden players
+    const int total = (int)config.playerScores.size();
+    if (total > maxRows)
+    {
+        tft.setTextSize(1);
+        tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+        tft.setCursor(CONTENT_X, SCREEN_H - 12);
+        tft.printf("+%d more players", total - maxRows);
+    }
+
+    // Hint
+    tft.setTextSize(1);
+    tft.setTextColor(SystemConfig::COLOR_STARLIGHT, TFT_BLACK);
+
+    const char *hint = "Press START to begin";
+    tft.setCursor(centerX(strlen(hint), 1), SCREEN_H - 12);
+    tft.print(hint);
+
+    config.displayState = SystemConfig::SHOW_LIST_PLAYERS;
+}
+
+// ==========================================
+// QUESTION SCREEN
+// ==========================================
+
+void DisplayOutputs::showQuestionScreen(int index)
+{
+    if (index >= (int)config.questionList.size())
+    {
+        showCompletionScreen();
+        return;
+    }
+
+    SystemConfig::Question &q = config.questionList[index];
+    config.answered = false;
+    config.selectedAnswer = ' ';
+    config.displayState = SystemConfig::SHOW_QUESTION;
+
+    tft.fillScreen(TFT_BLACK);
+
+    const int PAD_X = 10;
+    const int CONTENT_X = PAD_X;
+    const int CONTENT_W = SCREEN_W - 2 * PAD_X;
+
+    // Header — player left, instruction centred, Q counter right
+    tft.setTextSize(1);
+    tft.setTextColor(config.COLOR_DEEP_INDIGO, TFT_BLACK);
+
+    // Build strings first so we can measure them
+    int playerScore = getPlayerScore(config.currentPlayerName);
+
+    char playerBuf[32];
+    snprintf(playerBuf, sizeof(playerBuf), "%s: %d pts",
+             config.currentPlayerName.c_str(), playerScore);
+
+    char qCounter[16];
+    snprintf(qCounter, sizeof(qCounter), "Q%d/%d",
+             index + 1, (int)config.questionList.size());
+
+    const char *instruction = "Tap an answer to select";
+
+    // Zone boundaries
+    const int playerLeft = CONTENT_X;
+    const int playerRight = playerLeft + tft.textWidth(playerBuf);
+
+    const int qRight = SCREEN_W - PAD_X;
+    const int qLeft = qRight - tft.textWidth(qCounter);
+
+    // Centre the instruction in the gap between the two
+    const int gapMid = (playerRight + qLeft) / 2;
+    const int instrX = gapMid - (tft.textWidth(instruction) / 2);
+
+    tft.setCursor(playerLeft, 6);
+    tft.print(playerBuf);
+
+    tft.setCursor(instrX, 6);
+    tft.print(instruction);
+
+    tft.setCursor(qLeft, 6);
+    tft.print(qCounter);
+
+    tft.drawLine(CONTENT_X, 20, SCREEN_W - PAD_X, 20, config.COLOR_DEEP_INDIGO);
+
+    // Question text — wrapped, size 2, white
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+
+    int qY = 28;
+    wrapText(q.text, CONTENT_X, qY, CONTENT_W, 96, 18, TFT_WHITE, 2);
+
+    // Answer bands — 4 rows, 32 px tall, 38 px pitch
+    const int gap = 10;
+    const int bandY = qY + gap;
+    const int rowH = 32;
+    const int pitch = 38;
+
+    config.choiceBandH = rowH - 4;
+    config.choiceBandY[0] = bandY + 0 * pitch;
+    config.choiceBandY[1] = bandY + 1 * pitch;
+    config.choiceBandY[2] = bandY + 2 * pitch;
+    config.choiceBandY[3] = bandY + 3 * pitch;
+
+    auto drawChoice = [&](int i, char letter, const String &opt, bool removed)
+    {
+        RowStyle s;
+        s.bg = removed ? config.COLOR_CARD_BG_DIM : config.COLOR_CARD_BG;
+        s.border = config.COLOR_NEBULA_PURPLE;
+        s.prefixColor = removed ? TFT_DARKGREY : config.COLOR_DEEP_INDIGO;
+        s.textColor = removed ? TFT_DARKGREY : 0xCE79;
+
+        String prefix = String(letter) + ".";
+        String body = removed ? "(removed)" : opt;
+
+        drawListRow(config.choiceBandY[i], prefix, body, rowH, s);
+    };
+
+    drawChoice(0, 'A', q.optionA, q.optionA == "[REMOVED]");
+    drawChoice(1, 'B', q.optionB, q.optionB == "[REMOVED]");
+    drawChoice(2, 'C', q.optionC, q.optionC == "[REMOVED]");
+    drawChoice(3, 'D', q.optionD, q.optionD == "[REMOVED]");
+}
+
+// ==========================================
+// ANSWER BAND RENDERER
+// ==========================================
+
+void DisplayOutputs::drawListRow(int y, const String &prefix,
+                                 const String &text, int rowH,
+                                 const RowStyle &style)
+{
+    const int PAD_X = 10;
+    const int x = PAD_X;
+    const int w = SCREEN_W - 2 * PAD_X;
+    const int h = rowH - 4;
+
+    uint16_t bg = style.selected ? style.selectBg : style.bg;
+    uint16_t prefixColor = style.selected ? TFT_WHITE : style.prefixColor;
+    uint16_t textColor = style.selected ? TFT_WHITE : style.textColor;
+
+    tft.fillRect(x, y, w, h, bg);
+    tft.drawRect(x, y, w, h, style.border);
+
+    // Prefix (A. / B. / C. / D.)
+    tft.setTextSize(style.textSize == TextSize::Small ? 1 : 2);
+    tft.setTextColor(prefixColor, bg);
+    tft.setCursor(x + 8, y + 6);
+    tft.print(prefix);
+
+    int prefixW = tft.textWidth(prefix);
+
+    // Body text
+    tft.setTextColor(textColor, bg);
+    tft.setCursor(x + 8 + prefixW + 6, y + 6);
+
+    // Truncate with ellipsis only if the body overflows the card
+    String shown = text;
+    const int maxWidth = w - (8 + prefixW + 6) - 8;
+    while ((int)tft.textWidth(shown) > maxWidth && shown.length() > 3)
+    {
+        shown = shown.substring(0, shown.length() - 4) + "...";
+    }
+    tft.print(shown);
+}
+
+// ==========================================
+// FEEDBACK SCREENS
+// ==========================================
+
+void DisplayOutputs::showCorrectFeedbackScreen()
+{
+    tft.fillScreen(TFT_BLACK);
+
+    const int PAD_X = 10;
+    const int CONTENT_X = PAD_X;
+    const int CONTENT_W = SCREEN_W - 2 * PAD_X;
+
+    // Title
+    tft.setTextSize(2);
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+
+    const char *title = "CORRECT";
+    tft.setCursor(centerX(strlen(title), 2), 16);
+    tft.print(title);
+
+    tft.drawLine(CONTENT_X, 36, SCREEN_W - PAD_X, 36,
+                 SystemConfig::COLOR_DEEP_INDIGO);
+
+    // Status
+    tft.setTextSize(1);
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+
+    const char *status = "Answer accepted";
+    tft.setCursor(CONTENT_X, 46);
+    tft.print(status);
+
+    // Message card
+    const int cardY = 66;
+    const int cardH = 130;
+
+    tft.fillRect(CONTENT_X, cardY, CONTENT_W, cardH,
+                 SystemConfig::COLOR_CARD_BG);
+    tft.drawRect(CONTENT_X, cardY, CONTENT_W, cardH, TFT_GREEN);
+
+    // Headline
+    tft.setTextSize(3);
+    tft.setTextColor(TFT_WHITE, SystemConfig::COLOR_CARD_BG);
+
+    const char *line1 = "PASS TO";
+    const char *line2 = "NEXT PLAYER!";
+
+    tft.setCursor(CONTENT_X + 12, cardY + 16);
+    tft.print(line1);
+
+    tft.setCursor(CONTENT_X + 12, cardY + 46);
+    tft.print(line2);
+
+    tft.drawFastHLine(CONTENT_X + 12, cardY + 82,
+                      CONTENT_W - 24, 0x39E7);
+
+    // Stats — overall score + player's score
+    tft.setTextSize(1);
+    tft.setTextColor(SystemConfig::COLOR_STARLIGHT,
+                     SystemConfig::COLOR_CARD_BG);
+    tft.setCursor(CONTENT_X + 12, cardY + 90);
+    tft.print("Score");
+
+    char scoreBuf[16];
+    snprintf(scoreBuf, sizeof(scoreBuf), "%d", config.overallScore);
+    tft.setTextSize(3);
+    tft.setTextColor(SystemConfig::COLOR_NEBULA_PURPLE,
+                     SystemConfig::COLOR_CARD_BG);
+    tft.setCursor(CONTENT_X + 12, cardY + 100);
+    tft.print(scoreBuf);
+
+    tft.setTextSize(1);
+    tft.setTextColor(SystemConfig::COLOR_STARLIGHT,
+                     SystemConfig::COLOR_CARD_BG);
+    tft.setCursor(CONTENT_X + 100, cardY + 90);
+    tft.print(config.currentPlayerName);
+
+    int playerScore = getPlayerScore(config.currentPlayerName);
+    snprintf(scoreBuf, sizeof(scoreBuf), "%d pts", playerScore);
+    tft.setTextSize(3);
+    tft.setTextColor(TFT_WHITE, SystemConfig::COLOR_CARD_BG);
+    tft.setCursor(CONTENT_X + 100, cardY + 100);
+    tft.print(scoreBuf);
+
+    // Footer
+    tft.setTextSize(1);
+    tft.setTextColor(SystemConfig::COLOR_STARLIGHT, TFT_BLACK);
+
+    const char *hint = "Hand the device to the next player";
+    tft.setCursor(CONTENT_X, SCREEN_H - 12);
+    tft.print(hint);
+
+    config.displayState = SystemConfig::SHOW_CORRECT;
+    config.stateStartTime = millis();
+}
+
+void DisplayOutputs::showIncorrectFeedbackScreen()
+{
+    tft.fillScreen(TFT_BLACK);
+
+    const int PAD_X = 10;
+    const int CONTENT_X = PAD_X;
+    const int CONTENT_W = SCREEN_W - 2 * PAD_X;
+
+    // Title
+    tft.setTextSize(2);
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+
+    const char *title = "INCORRECT";
+    tft.setCursor(centerX(strlen(title), 2), 16);
+    tft.print(title);
+
+    tft.drawLine(CONTENT_X, 36, SCREEN_W - PAD_X, 36,
+                 SystemConfig::COLOR_DEEP_INDIGO);
+
+    // Status
+    tft.setTextSize(1);
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+
+    const char *status = "Answer rejected";
+    tft.setCursor(CONTENT_X, 46);
+    tft.print(status);
+
+    // Message card
+    const int cardY = 66;
+    const int cardH = 120;
+
+    tft.fillRect(CONTENT_X, cardY, CONTENT_W, cardH,
+                 SystemConfig::COLOR_CARD_BG);
+    tft.drawRect(CONTENT_X, cardY, CONTENT_W, cardH, TFT_RED);
+
+    // Player
+    tft.setTextSize(1);
+    tft.setTextColor(SystemConfig::COLOR_STARLIGHT,
+                     SystemConfig::COLOR_CARD_BG);
+    tft.setCursor(CONTENT_X + 12, cardY + 14);
+    tft.print("Player");
+
+    tft.setTextSize(3);
+    tft.setTextColor(TFT_WHITE, SystemConfig::COLOR_CARD_BG);
+    tft.setCursor(CONTENT_X + 12, cardY + 28);
+    tft.print(config.currentPlayerName);
+
+    // Status message
+    tft.setTextSize(1);
+    tft.setTextColor(SystemConfig::COLOR_STARLIGHT,
+                     SystemConfig::COLOR_CARD_BG);
+    tft.setCursor(CONTENT_X + 12, cardY + 68);
+    tft.print("Status");
+
+    tft.setTextSize(2);
+    tft.setTextColor(TFT_RED, SystemConfig::COLOR_CARD_BG);
+    tft.setCursor(CONTENT_X + 12, cardY + 82);
+    tft.print("Still in play.");
+
+    // Footer
+    tft.setTextSize(1);
+    tft.setTextColor(SystemConfig::COLOR_STARLIGHT, TFT_BLACK);
+
+    const char *hint = "You can retry this question";
+    tft.setCursor(CONTENT_X, SCREEN_H - 12);
+    tft.print(hint);
+
+    config.displayState = SystemConfig::SHOW_INCORRECT;
+    config.stateStartTime = millis();
+}
+
+// ==========================================
+// COMPLETION & WINNER
+// ==========================================
+
+void DisplayOutputs::showCompletionScreen()
+{
+    tft.fillScreen(TFT_BLACK);
+
+    const int PAD_X = 10;
+    const int CONTENT_X = PAD_X;
+    const int CONTENT_W = SCREEN_W - 2 * PAD_X;
+
+    // Title
+    tft.setTextSize(2);
+    tft.setTextColor(SystemConfig::COLOR_NEBULA_PURPLE, TFT_BLACK);
+
+    const char *title = "ALL DONE!";
+    tft.setCursor(centerX(strlen(title), 2), 16);
+    tft.print(title);
+
+    tft.drawLine(CONTENT_X, 36, SCREEN_W - PAD_X, 36,
+                 SystemConfig::COLOR_DEEP_INDIGO);
+
+    // Status
+    tft.setTextSize(1);
+    tft.setTextColor(SystemConfig::COLOR_NEBULA_PURPLE, TFT_BLACK);
+
+    const char *status = "Quiz finished";
+    tft.setCursor(CONTENT_X, 46);
+    tft.print(status);
+
+    // Stats card — overall score
+    const int cardY = 66;
+    const int cardH = 60;
+
+    tft.fillRect(CONTENT_X, cardY, CONTENT_W, cardH,
+                 SystemConfig::COLOR_CARD_BG);
+    tft.drawRect(CONTENT_X, cardY, CONTENT_W, cardH,
+                 SystemConfig::COLOR_NEBULA_PURPLE);
+
+    tft.setTextSize(1);
+    tft.setTextColor(SystemConfig::COLOR_STARLIGHT,
+                     SystemConfig::COLOR_CARD_BG);
+    tft.setCursor(CONTENT_X + 12, cardY + 10);
+    tft.print("Overall");
+
+    char scoreBuf[32];
+    snprintf(scoreBuf, sizeof(scoreBuf), "%d / %d",
+             config.overallScore, (int)config.questionList.size());
+
+    tft.setTextSize(3);
+    tft.setTextColor(TFT_WHITE, SystemConfig::COLOR_CARD_BG);
+    tft.setCursor(CONTENT_X + 12, cardY + 24);
+    tft.print(scoreBuf);
+
+    // Winner card
+    const int winY = 136;
+    const int winH = 66;
+
+    tft.fillRect(CONTENT_X, winY, CONTENT_W, winH,
+                 SystemConfig::COLOR_CARD_BG);
+    tft.drawRect(CONTENT_X, winY, CONTENT_W, winH, 0xFE60);
+
+    int highestScore = 0;
+    String topPlayer = "";
+    for (int i = 0; i < (int)config.playerScores.size(); i++)
+    {
+        if (config.playerScores[i].score > highestScore)
+        {
+            highestScore = config.playerScores[i].score;
+            topPlayer = config.playerScores[i].name;
+        }
+    }
+
+    tft.setTextSize(1);
+    tft.setTextColor(SystemConfig::COLOR_STARLIGHT,
+                     SystemConfig::COLOR_CARD_BG);
+    tft.setCursor(CONTENT_X + 12, winY + 10);
+    tft.print("Winner");
+
+    if (topPlayer != "")
+    {
+        tft.setTextSize(2);
+        tft.setTextColor(0xFE60, SystemConfig::COLOR_CARD_BG);
+        tft.setCursor(CONTENT_X + 12, winY + 24);
+        tft.print(topPlayer);
+
+        char ptsBuf[16];
+        snprintf(ptsBuf, sizeof(ptsBuf), "%d pts", highestScore);
+        tft.setTextSize(3);
+        tft.setTextColor(TFT_WHITE, SystemConfig::COLOR_CARD_BG);
+        tft.setCursor(CONTENT_X + 12, winY + 44);
+        tft.print(ptsBuf);
+    }
+    else
+    {
+        tft.setTextSize(2);
+        tft.setTextColor(TFT_RED, SystemConfig::COLOR_CARD_BG);
+        tft.setCursor(CONTENT_X + 12, winY + 28);
+        tft.print("No winner found");
+    }
+
+    // Footer
+    tft.setTextSize(1);
+    tft.setTextColor(SystemConfig::COLOR_STARLIGHT, TFT_BLACK);
+
+    const char *hint = "Press START for leaderboard";
+    tft.setCursor(CONTENT_X, SCREEN_H - 12);
+    tft.print(hint);
+
+    config.displayState = SystemConfig::SHOW_COMPLETE;
+}
+
+// ==========================================
+// LEADERBOARD
+// ==========================================
+
+void DisplayOutputs::showLeaderboardScreen()
+{
+    helper.sortPlayersByScore();
+    tft.fillScreen(TFT_BLACK);
+
+    if (config.playerScores.empty())
+    {
+        tft.setTextSize(2);
+        tft.setTextColor(TFT_RED, TFT_BLACK);
+        const char *msg = "No scores available.";
+        tft.setCursor(centerX(strlen(msg), 2), 110);
+        tft.print(msg);
+        config.displayState = SystemConfig::SHOW_LEADERBOARD;
+        return;
+    }
+
+    // Title bar
+    tft.fillRect(0, 0, SCREEN_W, 32, SystemConfig::COLOR_DEEP_INDIGO);
+    tft.setTextSize(2);
+    tft.setTextColor(TFT_WHITE, SystemConfig::COLOR_DEEP_INDIGO);
+    const char *title = "LEADERBOARD";
+    tft.setCursor(centerX(strlen(title), 2), 5);
+    tft.print(title);
+
+    tft.drawFastHLine(0, 32, SCREEN_W, SystemConfig::COLOR_NEBULA_PURPLE);
+    tft.drawFastHLine(0, 33, SCREEN_W, 0x5A6F);
+
+    // Row layout
+    const int rowTop = 44;
+    const int rowH = 36;
+    const int maxRows = (SCREEN_H - rowTop - 24) / rowH;
+
+    for (int i = 0; i < config.getMaxPlayer() && i < maxRows; i++)
+    {
+        const auto &player = config.playerScores[i];
+        const int yPos = rowTop + i * rowH;
+
+        const bool isTop3 = (i < 3);
+        const bool isCurrent = (player.name == config.currentPlayerName);
+        const bool isEliminated = player.isEliminated;
+
+        uint16_t medalColor = rankColorFor(i);
+
+        // Medal-tinted backgrounds for top 3, Card BG for current
+        uint16_t rowBg = TFT_BLACK;
+
+        if (isTop3 && !isEliminated)
+        {
+            rowBg = (i == 0)   ? 0x2965  // dark gold
+                    : (i == 1) ? 0x39E7  // dark silver
+                               : 0x3186; // dark bronze
+        }
+        else if (isCurrent)
+        {
+            rowBg = SystemConfig::COLOR_CARD_BG;
+        }
+
+        if (isTop3 || isCurrent)
+        {
+            tft.fillRect(4, yPos - 2, SCREEN_W - 8, rowH - 2, rowBg);
+        }
+
+        // Gold border ring around #1
+        if (i == 0 && !isEliminated)
+        {
+            tft.drawRect(4, yPos - 2, SCREEN_W - 8, rowH - 2, medalColor);
+        }
+
+        // Medal icon for top 3, plain rank number otherwise
+        if (isTop3 && !isEliminated)
+        {
+            drawMedalIcon(22, yPos + rowH / 2 - 2, medalColor);
+        }
+        else
+        {
+            tft.setTextSize(2);
+            tft.setTextColor(isEliminated ? TFT_RED : TFT_LIGHTGREY, rowBg);
+            tft.setCursor(18, yPos + 8);
+            tft.printf("%d", i + 1);
+        }
+
+        // Rank label ("1st", "2nd", "3rd" — only for top 3)
+        tft.setTextSize(2);
+        uint16_t rankTextColor = isEliminated ? TFT_RED
+                                 : isTop3     ? medalColor
+                                              : TFT_LIGHTGREY;
+        tft.setTextColor(rankTextColor, rowBg);
+
+        const char *rankLbl = (i == 0)   ? "1st"
+                              : (i == 1) ? "2nd"
+                              : (i == 2) ? "3rd"
+                                         : nullptr;
+
+        if (rankLbl)
+        {
+            tft.setCursor(44, yPos + 8);
+            tft.print(rankLbl);
+        }
+
+        // Player name (truncated with "." if >10 chars)
+        uint16_t nameColor = isEliminated ? TFT_RED
+                             : isCurrent  ? TFT_WHITE
+                             : isTop3     ? TFT_WHITE
+                                          : TFT_LIGHTGREY;
+
+        String name = player.name.isEmpty() ? "Player" : player.name;
+        if (name.length() > 10)
+            name = name.substring(0, 9) + ".";
+
+        tft.setTextColor(nameColor, rowBg);
+        tft.setCursor(100, yPos + 8);
+        tft.print(name.c_str());
+
+        // Score — right-aligned
+        tft.setTextSize(2);
+        tft.setTextColor(isEliminated ? TFT_RED : TFT_WHITE, rowBg);
+
+        char scoreBuf[8];
+        snprintf(scoreBuf, sizeof(scoreBuf), "%d", player.score);
+        int scoreW = strlen(scoreBuf) * 12; // size 2 = 12 px/char
+        int scoreX = SCREEN_W - 10 - scoreW;
+
+        if (isEliminated)
+            scoreX -= 46;
+
+        tft.setCursor(scoreX, yPos + 8);
+        tft.print(scoreBuf);
+
+        // Eliminated tag — append deceiver's name if someone deceived them
+        if (isEliminated)
+        {
+            tft.setTextSize(1);
+            tft.setTextColor(TFT_RED, rowBg);
+            tft.setCursor(SCREEN_W - 44, yPos + 12);
+
+            // Find who deceived this player (any player whose betrayedName
+            // matches the current player)
+            String deceiver = "";
+            for (const auto &q : config.playerScores)
+            {
+                if (q.betrayedName == player.name && q.name != player.name)
+                {
+                    deceiver = q.name;
+                    break;
+                }
+            }
+
+            if (deceiver.length() > 0)
+            {
+                // Truncate so the tag stays on one line
+                if (deceiver.length() > 8)
+                {
+                    deceiver = deceiver.substring(0, 7) + ".";
+                }
+
+                String tag = "(Elim by " + deceiver + ")";
+                tft.print(tag);
+            }
+            else
+            {
+                tft.print("(Elim)");
+            }
+        }
+    }
+
+    // Overflow footer
+    const int totalPlayers = static_cast<int>(config.playerScores.size());
+    if (totalPlayers > maxRows)
+    {
+        tft.setTextSize(1);
+        tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+        tft.setCursor(10, SCREEN_H - 12);
+        tft.printf("+%d more players", totalPlayers - maxRows);
+    }
+
+    // Prompt
+    tft.setTextSize(1);
+    tft.setTextColor(SystemConfig::COLOR_STARLIGHT, TFT_BLACK);
+    const char *prompt = "Press start to continue";
+    tft.setCursor(centerX(strlen(prompt), 2), SCREEN_H - 22);
+    tft.print(prompt);
+
+    config.displayState = SystemConfig::SHOW_LEADERBOARD;
+}
+
+// ==========================================
+// LEADERBOARD ICONS
+// ==========================================
+
+void DisplayOutputs::drawMedalIcon(int cx, int cy, uint16_t medalColor)
+{
+    // Brighter highlight for top-left arc
+    uint8_t hr = (medalColor >> 11) & 0x1F;
+    uint8_t hg = (medalColor >> 5) & 0x3F;
+    uint8_t hb = medalColor & 0x1F;
+    hr = (hr + 4) > 0x1F ? 0x1F : hr + 4;
+    hg = (hg + 8) > 0x3F ? 0x3F : hg + 8;
+    hb = (hb + 4) > 0x1F ? 0x1F : hb + 4;
+    uint16_t highlight = (hr << 11) | (hg << 5) | hb;
+
+    // Darker shadow for bottom-right arc
+    uint8_t sr = (medalColor >> 11) & 0x1F;
+    uint8_t sg = (medalColor >> 5) & 0x3F;
+    uint8_t sb = medalColor & 0x1F;
+    sr = (sr > 4) ? sr - 4 : 0;
+    sg = (sg > 8) ? sg - 8 : 0;
+    sb = (sb > 4) ? sb - 4 : 0;
+    uint16_t shadow = (sr << 11) | (sg << 5) | sb;
+
+    // Outer black ring
+    tft.fillCircle(cx, cy, 14, TFT_BLACK);
+
+    // Main medal body
+    tft.fillCircle(cx, cy, 13, medalColor);
+
+    // Highlight arc (top-left, offset -1)
+    tft.drawCircle(cx - 1, cy - 1, 11, highlight);
+
+    // Shadow arc (bottom-right, offset +1)
+    tft.drawCircle(cx + 1, cy + 1, 11, shadow);
+
+    // White 5-point star emblem
+    const int R = 8;
+    const int r = 3;
+
+    for (int a = 0; a < 360; a += 72)
+    {
+        float p1 = (a - 90) * DEG_TO_RAD;
+        float p2 = (a - 90 + 36) * DEG_TO_RAD;
+        float p3 = (a - 90 + 72) * DEG_TO_RAD;
+
+        tft.fillTriangle(
+            cx + R * cos(p1), cy + R * sin(p1),
+            cx + r * cos(p2), cy + r * sin(p2),
+            cx + R * cos(p3), cy + R * sin(p3),
+            TFT_WHITE);
+    }
+}
+
+uint16_t DisplayOutputs::rankColorFor(int rankIndex)
+{
+    switch (rankIndex)
+    {
+    case 0:
+        return 0xFE60; // gold
+    case 1:
+        return 0xC618; // silver
+    case 2:
+        return 0xCB22; // bronze
+    default:
+        return TFT_WHITE;
+    }
+}
+
+String DisplayOutputs::rankLabelFor(int rankIndex)
+{
+    switch (rankIndex)
+    {
+    case 0:
+        return "Top 1";
+    case 1:
+        return "Top 2";
+    case 2:
+        return "Top 3";
+    default:
+        return String(rankIndex + 1) + ".";
+    }
+}
+
+// ==========================================
 // EFFECT SCREENS
 // ==========================================
 
@@ -1138,7 +1280,7 @@ void DisplayOutputs::showHintScreen(char /*removedOption*/)
 
     // Title
     tft.setTextSize(2);
-    tft.setTextColor(SystemConfig::COLOR_DEEP_INDIGO, TFT_BLACK);
+    tft.setTextColor(TFT_GREEN, TFT_BLACK);
 
     const char *title = "HINT";
     tft.setCursor(centerX(strlen(title), 2), 16);
@@ -1196,7 +1338,7 @@ void DisplayOutputs::showPassToPlayerScreen(const String &currentPlayer,
 
     // Title
     tft.setTextSize(2);
-    tft.setTextColor(SystemConfig::COLOR_DEEP_INDIGO, TFT_BLACK);
+    tft.setTextColor(SystemConfig::COLOR_NEBULA_PURPLE, TFT_BLACK);
 
     const char *title = "HANDED OFF";
     tft.setCursor(centerX(strlen(title), 2), 16);
@@ -1267,7 +1409,7 @@ void DisplayOutputs::showDeductPointsScreen(const String &playerName,
 
     // Title
     tft.setTextSize(2);
-    tft.setTextColor(SystemConfig::COLOR_DEEP_INDIGO, TFT_BLACK);
+    tft.setTextColor(TFT_RED, TFT_BLACK);
 
     const char *title = "POINTS LOST";
     tft.setCursor(centerX(strlen(title), 2), 16);
@@ -1413,11 +1555,15 @@ void DisplayOutputs::showListPossibleSaviorScreen()
     tft.setTextSize(1);
     tft.setTextColor(SystemConfig::COLOR_NEBULA_PURPLE, TFT_BLACK);
 
-    const char *status = "Choose who will take the fall";
+    char status[64];
+    snprintf(status, sizeof(status),
+             "Do you still think, someone would save you, %s?",
+             cfg.currentPlayerName.c_str());
+
     tft.setCursor(CONTENT_X, 34);
     tft.print(status);
 
-    // Row geometry — tighter than question screen to leave room for button bar
+    // Row geometry — tighter to leave room for button bar
     const int rowTop = 46;
     const int rowH = 32;
     const int maxRows = (SCREEN_H - rowTop - 60) / rowH;
@@ -1429,7 +1575,7 @@ void DisplayOutputs::showListPossibleSaviorScreen()
     int rowIndex = 0;
     int maxDisplay = cfg.getMaxPlayer();
 
-    // Draw one row per eligible player (skip eliminated + current player)
+    // Draw one row per eligible player (skip eliminated + current)
     for (int i = 0; i < maxDisplay && rowIndex < maxRows; i++)
     {
         const auto &player = cfg.playerScores[i];
@@ -1474,6 +1620,158 @@ void DisplayOutputs::showListPossibleSaviorScreen()
     drawSaviorButtonBar();
 }
 
+void DisplayOutputs::showWouldYouSaveThePlayerScreen()
+{
+    SystemConfig &cfg = SystemConfig::get();
+
+    tft.fillScreen(TFT_BLACK);
+
+    const int PAD_X = 10;
+    const int CONTENT_X = PAD_X;
+    const int CONTENT_W = SCREEN_W - 2 * PAD_X;
+
+    // ==========================================
+    // TITLE
+    // ==========================================
+    tft.setTextSize(2);
+    tft.setTextColor(SystemConfig::COLOR_DEEP_INDIGO, TFT_BLACK);
+
+    const char *title = "LAST CHANCE";
+    tft.setCursor(centerX(strlen(title), 2), 10);
+    tft.print(title);
+
+    tft.drawLine(CONTENT_X, 30, SCREEN_W - PAD_X, 30,
+                 SystemConfig::COLOR_DEEP_INDIGO);
+
+    // ==========================================
+    // WHO'S IN TROUBLE
+    // ==========================================
+    tft.setTextSize(1);
+    tft.setTextColor(TFT_RED, TFT_BLACK);
+
+    char trouble[48];
+    snprintf(trouble, sizeof(trouble), "%s is about to be eliminated",
+             cfg.currentPlayerName.c_str());
+    tft.setCursor(CONTENT_X, 36);
+    tft.print(trouble);
+
+    // ==========================================
+    // IDENTIFY THE OTHER PLAYER (the potential savior)
+    // ==========================================
+    String saviorName = "";
+    for (const auto &p : cfg.playerScores)
+    {
+        if (p.isEliminated)
+            continue;
+        if (p.name == cfg.currentPlayerName)
+            continue;
+        saviorName = p.name;
+        break;
+    }
+
+    // ==========================================
+    // THE QUESTION
+    // ==========================================
+    const int cardY = 60;
+    const int cardH = 90;
+
+    tft.fillRect(CONTENT_X, cardY, CONTENT_W, cardH,
+                 SystemConfig::COLOR_CARD_BG);
+    tft.drawRect(CONTENT_X, cardY, CONTENT_W, cardH,
+                 SystemConfig::COLOR_NEBULA_PURPLE);
+
+    // Ask directly — no list, no ambiguity
+    tft.setTextSize(2);
+    tft.setTextColor(TFT_WHITE, SystemConfig::COLOR_CARD_BG);
+
+    const char *qLine1 = "Only one player";
+    const char *qLine2 = "remains.";
+
+    tft.setCursor(CONTENT_X + 12, cardY + 12);
+    tft.print(qLine1);
+
+    tft.setCursor(CONTENT_X + 12, cardY + 36);
+    tft.print(qLine2);
+
+    tft.setTextSize(1);
+    tft.setTextColor(SystemConfig::COLOR_STARLIGHT,
+                     SystemConfig::COLOR_CARD_BG);
+    tft.setCursor(CONTENT_X + 12, cardY + 64);
+    tft.print("Will you save them?");
+
+    // ==========================================
+    // BUTTON GEOMETRY
+    // ==========================================
+    const int btnW = 110;
+    const int btnH = 44;
+    const int gap = 20;
+    const int totalW = btnW * 2 + gap;
+    const int startX = (SCREEN_W - totalW) / 2;
+    const int btnY = 164;
+
+    const int yesX = startX;
+    const int noX = startX + btnW + gap;
+
+    // ==========================================
+    // DRAW BUTTONS — SAVE / REFUSE
+    // ==========================================
+    auto drawFlatButton = [&](int x, int y, int w, int h,
+                              const char *label,
+                              uint16_t borderColor,
+                              uint16_t textColor)
+    {
+        tft.fillRect(x, y, w, h, SystemConfig::COLOR_CARD_BG);
+
+        // 2 px border for emphasis
+        tft.drawRect(x, y, w, h, borderColor);
+        tft.drawRect(x + 1, y + 1, w - 2, h - 2, borderColor);
+
+        // Centered label
+        tft.setTextSize(2);
+        int labelW = strlen(label) * 12; // size 2 = 12 px/char
+        int labelX = x + (w - labelW) / 2;
+        int labelY = y + (h - 16) / 2;
+
+        tft.setTextColor(textColor, SystemConfig::COLOR_CARD_BG);
+        tft.setCursor(labelX, labelY);
+        tft.print(label);
+    };
+
+    drawFlatButton(yesX, btnY, btnW, btnH, "SAVE",
+                   SystemConfig::COLOR_NEBULA_PURPLE,
+                   TFT_WHITE);
+
+    drawFlatButton(noX, btnY, btnW, btnH, "REFUSE",
+                   TFT_RED,
+                   TFT_RED);
+
+    // ==========================================
+    // SAVE GEOMETRY FOR TOUCH HANDLING
+    // ==========================================
+    // Reuse the existing new-session button geometry fields so the
+    // touch handler doesn't need new state.
+    cfg.newSessionYesX = yesX;
+    cfg.newSessionNoX = noX;
+    cfg.newSessionBtnY = btnY;
+    cfg.newSessionBtnW = btnW;
+    cfg.newSessionBtnH = btnH;
+
+    // ==========================================
+    // FOOTER
+    // ==========================================
+    tft.setTextSize(1);
+    tft.setTextColor(SystemConfig::COLOR_STARLIGHT, TFT_BLACK);
+
+    char hint[48];
+    snprintf(hint, sizeof(hint), "%s, the choice is yours",
+             saviorName.isEmpty() ? "Player" : saviorName.c_str());
+    tft.setCursor(CONTENT_X, SCREEN_H - 12);
+    tft.print(hint);
+
+    // New display state
+    config.displayState = SystemConfig::SHOW_WOULD_YOU_SAVE;
+}
+
 void DisplayOutputs::drawSaviorButtonBar()
 {
     SystemConfig &cfg = SystemConfig::get();
@@ -1485,7 +1783,7 @@ void DisplayOutputs::drawSaviorButtonBar()
     // Bar geometry — 3 buttons split evenly with 6 px gaps
     const int barH = 34;
     const int gap = 6;
-    const int barY = SCREEN_H - barH - 8; // 8 px bottom margin
+    const int barY = SCREEN_H - barH - 8;
 
     const int btnW = (CONTENT_W - gap * 2) / 3;
     const int btnH = barH;
@@ -1502,7 +1800,7 @@ void DisplayOutputs::drawSaviorButtonBar()
     cfg.saviorBtnW = btnW;
     cfg.saviorBtnH = btnH;
 
-    // Legacy fields — kept in case older code reads them
+    // Legacy fields
     cfg.saviorFooterY = barY;
     cfg.saviorFooterSplit1 = nextX;
     cfg.saviorFooterSplit2 = skipX;
@@ -1519,9 +1817,9 @@ void DisplayOutputs::drawSaviorButtonBar()
         tft.drawRoundRect(x, barY, btnW, btnH, radius, borderColor);
 
         tft.setTextSize(1);
-        int labelW = strlen(label) * 6; // size 1 = 6 px per char
+        int labelW = strlen(label) * 6;
         int labelX = x + (btnW - labelW) / 2;
-        int labelY = barY + (btnH - 8) / 2; // 8 px font height
+        int labelY = barY + (btnH - 8) / 2;
 
         tft.setTextColor(textColor, SystemConfig::COLOR_CARD_BG);
         tft.setCursor(labelX, labelY);
@@ -1614,24 +1912,26 @@ void DisplayOutputs::showNoneEliminatedScreen()
 
 void DisplayOutputs::showEliminatedPlayerScreen(const String &playerName)
 {
-    // Reason-specific message
+    // ==========================================
+    // REASON MESSAGE (fallback)
+    // ==========================================
     String message = "Eliminated!";
     switch (config.eliminationReason)
     {
     case SystemConfig::ELIM_DEDUCT_POINTS:
-        message = "I lost all my points.";
+        message = "My points... It's gone...";
         break;
     case SystemConfig::ELIM_PENALTY_QUESTION:
-        message = "I failed to answer correctly.";
+        message = "Why it's so difficult?!";
         break;
     case SystemConfig::ELIM_TASK_FAILED:
-        message = "I failed to accomplish my task.";
+        message = "I forgot the task!";
         break;
     case SystemConfig::ELIM_SACRIFICIAL_CONS:
-        message = "I sacrificed myself for another.";
+        message = "I'm too kind to save them...";
         break;
     case SystemConfig::ELIM_REFUSE_TO_REVIVE:
-        message = "No one would save me.";
+        message = "Mark my word. I shall return!";
         break;
     case SystemConfig::ELIM_UNKNOWN:
     default:
@@ -1639,6 +1939,63 @@ void DisplayOutputs::showEliminatedPlayerScreen(const String &playerName)
         break;
     }
 
+    // ==========================================
+    // BETRAYAL ANALYSIS
+    // ==========================================
+    // Two questions to answer:
+    //   1. Did anyone betray this player?     → betrayedBy
+    //   2. Did this player betray anyone?     → betrayedWho
+    //
+    // The betrayal record lives on the PERPETRATOR's PlayerScore,
+    // in a `betrayedName` field. See GameMechanics::recordBetrayal.
+
+    String betrayedBy = "";  // name of who betrayed this player
+    String betrayedWho = ""; // name of who this player betrayed
+
+    // Pass 1 — did anyone betray this player?
+    for (const auto &p : config.playerScores)
+    {
+        if (p.betrayedName == playerName && p.name != playerName)
+        {
+            betrayedBy = p.name;
+            break;
+        }
+    }
+
+    // Pass 2 — did this player betray anyone?
+    for (const auto &p : config.playerScores)
+    {
+        if (p.name == playerName && p.betrayedName.length() > 0)
+        {
+            betrayedWho = p.betrayedName;
+            break;
+        }
+    }
+
+    // ==========================================
+    // MESSAGE OVERRIDE
+    // ==========================================
+    // Priority order:
+    //   1. This player betrayed someone — the last thing they did
+    //      is the story the screen should tell.
+    //   2. Someone betrayed this player — the victim's angle.
+    //   3. No betrayal — fall back to the mechanical reason.
+
+    const bool isPerpetrator = betrayedWho.length() > 0;
+    const bool isVictim = betrayedBy.length() > 0;
+
+    if (isPerpetrator)
+    {
+        message = "Too bad... How naive, " + betrayedWho + ".";
+    }
+    else if (isVictim)
+    {
+        message = "Liar. I'll remember this, " + betrayedBy + ".";
+    }
+
+    // ==========================================
+    // SCREEN RENDER
+    // ==========================================
     tft.fillScreen(TFT_BLACK);
 
     const int PAD_X = 10;
@@ -1655,15 +2012,18 @@ void DisplayOutputs::showEliminatedPlayerScreen(const String &playerName)
 
     tft.drawLine(CONTENT_X, 36, SCREEN_W - PAD_X, 36, TFT_RED);
 
-    // Status
+    // Status line — describes the role
     tft.setTextSize(1);
     tft.setTextColor(SystemConfig::COLOR_NEBULA_PURPLE, TFT_BLACK);
 
-    const char *status = "Player is out of the game";
+    const char *status =
+        isPerpetrator ? "You broke a promise"
+        : isVictim    ? "Your teammate refused to save you"
+                      : "Player is out of the game";
     tft.setCursor(CONTENT_X, 46);
     tft.print(status);
 
-    // Card — red border
+    // Card
     const int cardY = 66;
     const int cardH = 110;
 
@@ -1686,12 +2046,12 @@ void DisplayOutputs::showEliminatedPlayerScreen(const String &playerName)
     tft.drawFastHLine(CONTENT_X + 12, cardY + 60,
                       CONTENT_W - 24, 0x4208);
 
-    // Reason message — wrapped
+    // Message
     tft.setTextSize(1);
     tft.setTextColor(SystemConfig::COLOR_STARLIGHT,
                      SystemConfig::COLOR_CARD_BG);
     tft.setCursor(CONTENT_X + 12, cardY + 68);
-    tft.print("Reason");
+    tft.print("Message from the character");
 
     tft.setTextSize(2);
     tft.setTextColor(TFT_WHITE, SystemConfig::COLOR_CARD_BG);
@@ -1705,7 +2065,10 @@ void DisplayOutputs::showEliminatedPlayerScreen(const String &playerName)
     tft.setTextSize(1);
     tft.setTextColor(SystemConfig::COLOR_STARLIGHT, TFT_BLACK);
 
-    const char *hint = "The game continues with the remaining players";
+    const char *hint =
+        isPerpetrator ? "The game remembers what you did"
+        : isVictim    ? "The game continues — remember this"
+                      : "The game continues with the remaining players";
     tft.setCursor(CONTENT_X, SCREEN_H - 12);
     tft.print(hint);
 }

@@ -4,6 +4,7 @@
  */
 #include "core/inputs.h"
 #include "game/helper.h"
+#include "game/game_mechanics.h"
 #include <TFT_eSPI.h>
 
 // Global TFT object (defined in main.cpp)
@@ -181,6 +182,25 @@ char Inputs::mapTouchToChoice(uint16_t x, uint16_t y)
 // SAVIOR SELECTION
 // ==========================================
 
+String Inputs::findPartnerName(const String &playerName)
+{
+    SystemConfig &config = SystemConfig::get();
+
+    for (const auto &p : config.playerScores)
+    {
+        if (p.name == playerName)
+        {
+            const String partner = p.pairedUpWith;
+            if (partner.length() > 0 && partner != "Solo")
+            {
+                return partner;
+            }
+            return "";
+        }
+    }
+    return "";
+}
+
 void Inputs::choicesButtonSavior()
 {
     SystemConfig &config = SystemConfig::get();
@@ -188,17 +208,24 @@ void Inputs::choicesButtonSavior()
     const unsigned long currentTime = millis();
 
     const int activePlayers = helper.getActivePlayerCount();
-    if (activePlayers == 0) return;
+    if (activePlayers == 0)
+        return;
 
-    if (currentTime - lastTouchTime < TOUCH_DEBOUNCE + 150) return;
+    if (currentTime - lastTouchTime < TOUCH_DEBOUNCE + 150)
+        return;
 
     uint16_t x = 0, y = 0;
-    if (!tft.getTouch(&x, &y)) return;
+    if (!tft.getTouch(&x, &y))
+        return;
 
-    if (mirrorX_) x = SCREEN_W - 1 - x;
-    if (mirrorY_) y = SCREEN_H - 1 - y;
-    if (x >= SCREEN_W) x = SCREEN_W - 1;
-    if (y >= SCREEN_H) y = SCREEN_H - 1;
+    if (mirrorX_)
+        x = SCREEN_W - 1 - x;
+    if (mirrorY_)
+        y = SCREEN_H - 1 - y;
+    if (x >= SCREEN_W)
+        x = SCREEN_W - 1;
+    if (y >= SCREEN_H)
+        y = SCREEN_H - 1;
 
     lastTouchTime = currentTime;
     Serial.printf("👆 Savior touch: (%d, %d)\n", x, y);
@@ -206,7 +233,7 @@ void Inputs::choicesButtonSavior()
     // Tap a row → select that player
     for (int row = 0; row < config.saviorRowCount; row++)
     {
-        int top    = config.saviorRowY[row];
+        int top = config.saviorRowY[row];
         int bottom = top + config.saviorRowH;
 
         if (y >= top && y < bottom)
@@ -215,8 +242,10 @@ void Inputs::choicesButtonSavior()
             for (int i = 0; i < config.getMaxPlayer(); i++)
             {
                 const auto &p = config.playerScores[i];
-                if (p.isEliminated) continue;
-                if (p.name == config.currentPlayerName) continue;
+                if (p.isEliminated)
+                    continue;
+                if (p.name == config.currentPlayerName)
+                    continue;
 
                 if (rowIndex == row)
                 {
@@ -234,12 +263,36 @@ void Inputs::choicesButtonSavior()
 
     // Tap the button bar
     if (y >= config.saviorBtnBarY &&
-        y <  config.saviorBtnBarY + config.saviorBtnH)
+        y < config.saviorBtnBarY + config.saviorBtnH)
     {
         // Elect (left)
         if (x >= config.saviorBtnElectX &&
-            x <  config.saviorBtnElectX + config.saviorBtnW)
+            x < config.saviorBtnElectX + config.saviorBtnW)
         {
+            const String targetName = config.currentPlayerName;
+            const String partnerName = findPartnerName(targetName);
+
+            if (config.selectedSaviorIndex >= 0 &&
+                config.selectedSaviorIndex < (int)config.playerScores.size())
+            {
+                const String electedSavior =
+                    config.playerScores[config.selectedSaviorIndex].name;
+
+                // A rival stepping in = the partner was displaced
+                const bool rivalIntervened =
+                    partnerName.length() > 0 &&
+                    partnerName != electedSavior &&
+                    partnerName != targetName;
+
+                if (rivalIntervened)
+                {
+                    GameMechanics::get().recordBetrayal(electedSavior,
+                                                        partnerName);
+                }
+
+                config.saviorPlayerName = electedSavior;
+            }
+
             config.revivingProcess = true;
             config.refuseToRevive = false;
             Serial.println("✅ Elected current selection");
@@ -248,7 +301,7 @@ void Inputs::choicesButtonSavior()
 
         // Next (middle)
         if (x >= config.saviorBtnNextX &&
-            x <  config.saviorBtnNextX + config.saviorBtnW)
+            x < config.saviorBtnNextX + config.saviorBtnW)
         {
             advanceSaviorSelection();
             config.revivingProcess = false;
@@ -259,14 +312,126 @@ void Inputs::choicesButtonSavior()
 
         // Skip (right)
         if (x >= config.saviorBtnSkipX &&
-            x <  config.saviorBtnSkipX + config.saviorBtnW)
+            x < config.saviorBtnSkipX + config.saviorBtnW)
         {
+            const String targetName = config.currentPlayerName;
+            const String partnerName = findPartnerName(targetName);
+
+            // If the target had a partner, the partner is the one
+            // who should have stepped in. Skipping = the partner failed.
+            const bool partnerRefused =
+                partnerName.length() > 0 &&
+                partnerName != targetName;
+
+            if (partnerRefused)
+            {
+                GameMechanics::get().recordBetrayal(partnerName, targetName);
+            }
+
             config.refuseToRevive = true;
             config.revivingProcess = true;
             config.selectedSaviorIndex = -1;
+            config.saviorPlayerName = "";
             Serial.println("🚫 Skipped");
             return;
         }
+    }
+}
+
+void Inputs::choicesButtonLastChance()
+{
+    SystemConfig &config = SystemConfig::get();
+    const unsigned long currentTime = millis();
+
+    // Debounce — same as the other touch handlers, plus the extra
+    // 150 ms that the savior screen uses to avoid double-fires
+    // between the initial tap and the decision tap.
+    if (currentTime - lastTouchTime < TOUCH_DEBOUNCE + 150)
+        return;
+
+    uint16_t x = 0, y = 0;
+    if (!tft.getTouch(&x, &y))
+        return;
+
+    // Apply mirror
+    if (mirrorX_) x = SCREEN_W - 1 - x;
+    if (mirrorY_) y = SCREEN_H - 1 - y;
+
+    if (x >= SCREEN_W) x = SCREEN_W - 1;
+    if (y >= SCREEN_H) y = SCREEN_H - 1;
+
+    lastTouchTime = currentTime;
+
+    // ==========================================
+    // HIT TEST — reuse the geometry saved by
+    // DisplayOutputs::showWouldYouSaveThePlayerScreen()
+    // ==========================================
+    const int btnY = config.newSessionBtnY;
+    const int btnH = config.newSessionBtnH;
+
+    if (y < btnY || y >= btnY + btnH)
+        return; // tap outside the button row
+
+    const int yesX = config.newSessionYesX;
+    const int noX  = config.newSessionNoX;
+    const int btnW = config.newSessionBtnW;
+
+    // ==========================================
+    // SAVE (left button)
+    // ==========================================
+    if (x >= yesX && x < yesX + btnW)
+    {
+        // The surviving player is the savior. Find them.
+        const String targetName = config.currentPlayerName;
+        String savior = "";
+
+        for (const auto &p : config.playerScores)
+        {
+            if (p.isEliminated) continue;
+            if (p.name == targetName) continue;
+            savior = p.name;
+            break;
+        }
+
+        if (savior.isEmpty())
+        {
+            Serial.println("⚠️ Last-chance SAVE: no surviving player found");
+            return;
+        }
+
+        config.saviorPlayerName = savior;
+        config.refuseToRevive = false;
+        config.revivingProcess = true;
+
+        Serial.printf("✅ Last-chance: %s will save %s\n",
+                      savior.c_str(),
+                      targetName.c_str());
+        return;
+    }
+
+    // ==========================================
+    // REFUSE (right button)
+    // ==========================================
+    if (x >= noX && x < noX + btnW)
+    {
+        // The survivor is refusing. Record it as a betrayal against
+        // the partner — but only if the target actually had a partner.
+        const String targetName = config.currentPlayerName;
+        const String partnerName = findPartnerName(targetName);
+
+        if (partnerName.length() > 0 &&
+            partnerName != "Solo" &&
+            partnerName != targetName)
+        {
+            GameMechanics::get().recordBetrayal(partnerName, targetName);
+        }
+
+        config.saviorPlayerName = "";
+        config.refuseToRevive = true;
+        config.revivingProcess = true;
+
+        Serial.println("🚫 Last-chance: refused to save");
+        return;
     }
 }
 
@@ -275,7 +440,8 @@ void Inputs::advanceSaviorSelection()
     SystemConfig &config = SystemConfig::get();
 
     const int maxPlayers = config.getMaxPlayer();
-    if (maxPlayers == 0) return;
+    if (maxPlayers == 0)
+        return;
 
     int start = config.selectedSaviorIndex;
 
@@ -297,7 +463,8 @@ void Inputs::advanceSaviorSelection()
         }
 
         // Avoid infinite loop if nothing is eligible
-        if (config.selectedSaviorIndex == start) break;
+        if (config.selectedSaviorIndex == start)
+            break;
     }
 }
 

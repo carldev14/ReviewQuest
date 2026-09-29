@@ -31,7 +31,8 @@ public:
     // ==========================================
     void initialize();
     void handleAnswer(char option);
-
+    void recordBetrayal(const String &perpetrator, const String &victim);
+    
     // ==========================================
     // ANSWER RESULTS
     // ==========================================
@@ -51,7 +52,7 @@ public:
     // ==========================================
     // PENALTY STATE
     // ==========================================
-    bool isPenaltyQuestion();             // existing accessor
+    bool isPenaltyQuestion(); // existing accessor
     int getPenaltyCount() const { return penaltyCount; }
     int getMaxPenaltyCount() const { return MAX_PENALTY_COUNT; }
     void resetPenaltyCount() { penaltyCount = 0; }

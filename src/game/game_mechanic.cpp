@@ -27,9 +27,9 @@ GameMechanics::~GameMechanics()
 void GameMechanics::initialize()
 {
     Serial.println("🔧 Initializing GameMechanics...");
-    penaltyCount            = 0;
+    penaltyCount = 0;
     isPenaltyQuestionActive = false;
-    isPenaltyAccomplished   = false;
+    isPenaltyAccomplished = false;
 }
 
 // ==========================================
@@ -48,7 +48,7 @@ void GameMechanics::handleAnswer(char option)
         return;
     }
 
-    config.answered       = true;
+    config.answered = true;
     config.selectedAnswer = option;
 
     // ---- Validate state ----
@@ -105,6 +105,33 @@ void GameMechanics::handleAnswer(char option)
 }
 
 // ==========================================
+// Record betrayal
+// ==========================================
+
+void GameMechanics::recordBetrayal(const String &perpetrator,
+                                   const String &victim)
+{
+    if (perpetrator.isEmpty() || victim.isEmpty())
+        return;
+    if (perpetrator == victim)
+        return;
+
+    for (auto &p : config.playerScores)
+    {
+        if (p.name == perpetrator)
+        {
+            p.betrayedName = victim;
+            Serial.printf("⚔️ Betrayal recorded: %s betrayed %s\n",
+                          perpetrator.c_str(),
+                          victim.c_str());
+            return;
+        }
+    }
+    Serial.printf("⚠️ recordBetrayal: perpetrator '%s' not found\n",
+                  perpetrator.c_str());
+}
+
+// ==========================================
 // ANSWER RESULTS
 // ==========================================
 
@@ -130,7 +157,7 @@ void GameMechanics::handleCorrectAnswer()
         return;
     }
 
-    config.displayState   = SystemConfig::SHOW_CORRECT;
+    config.displayState = SystemConfig::SHOW_CORRECT;
     config.stateStartTime = millis();
 }
 
@@ -141,7 +168,7 @@ void GameMechanics::handleIncorrectAnswer()
     display.showIncorrectFeedbackScreen();
     actuators.runIncorrectFeedbackAction();
 
-    config.displayState   = SystemConfig::SHOW_INCORRECT;
+    config.displayState = SystemConfig::SHOW_INCORRECT;
     config.stateStartTime = millis();
 
     runPenalty();
@@ -157,7 +184,7 @@ void GameMechanics::handlePenaltyQuestionResult(bool isCorrect)
 
     if (isCorrect)
     {
-        penaltyCount            = 0;
+        penaltyCount = 0;
         isPenaltyQuestionActive = false;
         Serial.println("✅ Penalty question answered correctly! Penalty cleared.");
 
@@ -178,7 +205,7 @@ void GameMechanics::handlePenaltyQuestionResult(bool isCorrect)
             return;
         }
 
-        config.displayState   = SystemConfig::SHOW_CORRECT;
+        config.displayState = SystemConfig::SHOW_CORRECT;
         config.stateStartTime = millis();
         return;
     }
@@ -191,7 +218,7 @@ void GameMechanics::handlePenaltyQuestionResult(bool isCorrect)
     {
         Serial.println("💀 ELIMINATED! Too many penalty questions wrong!");
         config.eliminationReason = SystemConfig::ELIM_PENALTY_QUESTION;
-        penaltyCount            = 0;
+        penaltyCount = 0;
         isPenaltyQuestionActive = false;
         eliminatePlayer();
     }
@@ -199,7 +226,7 @@ void GameMechanics::handlePenaltyQuestionResult(bool isCorrect)
     {
         display.showIncorrectFeedbackScreen();
         actuators.runIncorrectFeedbackAction();
-        config.displayState   = SystemConfig::SHOW_INCORRECT;
+        config.displayState = SystemConfig::SHOW_INCORRECT;
         config.stateStartTime = millis();
     }
 }
@@ -244,11 +271,11 @@ void GameMechanics::runGoodLuck()
 
     if (roll < 10 && activePlayers > 1)
     {
-        passToAnotherPlayer();      // 10%
+        passToAnotherPlayer(); // 10%
     }
     else
     {
-        giveHint();                 // 40% + fallback
+        giveHint(); // 40% + fallback
     }
 }
 
@@ -260,12 +287,12 @@ void GameMechanics::runBadLuck()
 
     if (roll < 10)
     {
-        incrementQuestion();        // 10%
+        incrementQuestion(); // 10%
     }
     else
     {
         int pointsToDeduct = (random(0, 2) == 0) ? 1 : 2;
-        deductPoints(pointsToDeduct);   // 40% + fallback
+        deductPoints(pointsToDeduct); // 40% + fallback
     }
 }
 
@@ -277,7 +304,7 @@ void GameMechanics::giveHint()
 {
     Serial.println("💡 HINT: Removing one wrong answer!");
 
-    int originalIndex         = config.questionOrder[config.currentQuestionPos];
+    int originalIndex = config.questionOrder[config.currentQuestionPos];
     SystemConfig::Question &q = config.questionList[originalIndex];
 
     if (q.originalOptionA.isEmpty())
@@ -290,25 +317,38 @@ void GameMechanics::giveHint()
 
     char correct = q.initialCharAns;
     char wrongOptions[3];
-    int  wrongIndex = 0;
+    int wrongIndex = 0;
 
-    if (correct != 'A' && q.optionA != "[REMOVED]") wrongOptions[wrongIndex++] = 'A';
-    if (correct != 'B' && q.optionB != "[REMOVED]") wrongOptions[wrongIndex++] = 'B';
-    if (correct != 'C' && q.optionC != "[REMOVED]") wrongOptions[wrongIndex++] = 'C';
-    if (correct != 'D' && q.optionD != "[REMOVED]") wrongOptions[wrongIndex++] = 'D';
+    if (correct != 'A' && q.optionA != "[REMOVED]")
+        wrongOptions[wrongIndex++] = 'A';
+    if (correct != 'B' && q.optionB != "[REMOVED]")
+        wrongOptions[wrongIndex++] = 'B';
+    if (correct != 'C' && q.optionC != "[REMOVED]")
+        wrongOptions[wrongIndex++] = 'C';
+    if (correct != 'D' && q.optionD != "[REMOVED]")
+        wrongOptions[wrongIndex++] = 'D';
 
-    if (wrongIndex == 0) return;
+    if (wrongIndex == 0)
+        return;
 
-    int  remove   = random(0, wrongIndex);
+    int remove = random(0, wrongIndex);
     char toRemove = wrongOptions[remove];
     Serial.printf("Removed option %c\n", toRemove);
 
     switch (toRemove)
     {
-    case 'A': q.optionA = "[REMOVED]"; break;
-    case 'B': q.optionB = "[REMOVED]"; break;
-    case 'C': q.optionC = "[REMOVED]"; break;
-    case 'D': q.optionD = "[REMOVED]"; break;
+    case 'A':
+        q.optionA = "[REMOVED]";
+        break;
+    case 'B':
+        q.optionB = "[REMOVED]";
+        break;
+    case 'C':
+        q.optionC = "[REMOVED]";
+        break;
+    case 'D':
+        q.optionD = "[REMOVED]";
+        break;
     }
 
     display.showHintScreen(toRemove);
@@ -322,10 +362,14 @@ void GameMechanics::resetAllHints()
     {
         q.hintUsed = false;
 
-        if (q.optionA == "[REMOVED]") q.optionA = q.originalOptionA;
-        if (q.optionB == "[REMOVED]") q.optionB = q.originalOptionB;
-        if (q.optionC == "[REMOVED]") q.optionC = q.originalOptionC;
-        if (q.optionD == "[REMOVED]") q.optionD = q.originalOptionD;
+        if (q.optionA == "[REMOVED]")
+            q.optionA = q.originalOptionA;
+        if (q.optionB == "[REMOVED]")
+            q.optionB = q.originalOptionB;
+        if (q.optionC == "[REMOVED]")
+            q.optionC = q.originalOptionC;
+        if (q.optionD == "[REMOVED]")
+            q.optionD = q.originalOptionD;
     }
 
     Serial.println("🔄 All hints reset!");
@@ -359,29 +403,32 @@ void GameMechanics::deductPoints(int pointsToDeduct)
     delay(1500);
 
     int currentScore = 0;
-    int playerIndex  = -1;
+    int playerIndex = -1;
 
     for (int i = 0; i < (int)config.playerScores.size(); i++)
     {
         if (config.playerScores[i].name == config.currentPlayerName)
         {
             currentScore = config.playerScores[i].score;
-            playerIndex  = i;
+            playerIndex = i;
             break;
         }
     }
 
-    if (playerIndex == -1) return;
+    if (playerIndex == -1)
+        return;
 
     int newScore = currentScore - pointsToDeduct;
-    if (newScore < 0) newScore = 0;
+    if (newScore < 0)
+        newScore = 0;
     config.playerScores[playerIndex].score = newScore;
 
     Serial.printf("%s lost %d points! New score: %d\n",
                   config.currentPlayerName.c_str(), pointsToDeduct, newScore);
 
     config.overallScore -= pointsToDeduct;
-    if (config.overallScore < 0) config.overallScore = 0;
+    if (config.overallScore < 0)
+        config.overallScore = 0;
 
     if (newScore == 0)
     {
@@ -423,7 +470,7 @@ void GameMechanics::incrementQuestion()
     delay(1500);
 
     SystemConfig::Question penaltyQuestion = getRandomQuestion();
-    penaltyQuestion.id   = config.nextQuestionId++;
+    penaltyQuestion.id = config.nextQuestionId++;
     penaltyQuestion.text = "PENALTY: " + penaltyQuestion.text;
 
     int insertPos = config.currentQuestionPos + 1;
@@ -435,14 +482,14 @@ void GameMechanics::incrementQuestion()
         config.questionOrder.push_back(i);
 
     penaltyCount++;
-    isPenaltyQuestionActive   = true;
+    isPenaltyQuestionActive = true;
     config.currentQuestionPos = insertPos;
 
     Serial.printf("✅ Penalty added! (Attempt %d/%d) — pos %d\n",
                   penaltyCount, MAX_PENALTY_COUNT, config.currentQuestionPos);
 
-    int penaltyIndex     = config.questionOrder[config.currentQuestionPos];
-    config.answered      = false;
+    int penaltyIndex = config.questionOrder[config.currentQuestionPos];
+    config.answered = false;
     display.showQuestionScreen(penaltyIndex);
 }
 
@@ -483,11 +530,12 @@ void GameMechanics::eliminatePlayer()
     // ---- Decide who gets eliminated ----
     String saviorPlayerName = reviveByPeerEliminate();
     String candidate;
-    bool   hasSavior = !saviorPlayerName.isEmpty();
+    Serial.printf("Savior: %s\n", saviorPlayerName.c_str());   // .c_str() + newline
+    bool hasSavior = !saviorPlayerName.isEmpty();
+    bool wasSaved  = false;   // ← new flag
 
     if (hasSavior)
     {
-        // 70% — savior falls instead
         if (random(0, 100) > 30)
         {
             candidate = saviorPlayerName;
@@ -498,55 +546,61 @@ void GameMechanics::eliminatePlayer()
         {
             Serial.printf("✅ Savior %s saved the current player!\n", saviorPlayerName.c_str());
             display.showNoneEliminatedScreen();
-            return;
+            delay(1000);
+            wasSaved = true;   // ← do NOT return, just flag it
         }
     }
     else
     {
         candidate = config.currentPlayerName;
         Serial.printf("💀 No savior found! %s is eliminated.\n", config.currentPlayerName.c_str());
-        config.eliminationReason = SystemConfig::ELIM_REFUSE_TO_REVIVE;
+        const auto current = config.eliminationReason;
+        config.eliminationReason =
+            (current == SystemConfig::ELIM_DEDUCT_POINTS)
+                ? SystemConfig::ELIM_REFUSE_TO_REVIVE
+                : SystemConfig::ELIM_DEDUCT_POINTS;
     }
 
-    // ---- Mark player eliminated ----
-    bool found = false;
-    for (auto &player : config.playerScores)
+    // ---- Only run the elimination path if someone actually got eliminated ----
+    if (!wasSaved)
     {
-        if (player.name == candidate)
+        bool found = false;
+        for (auto &player : config.playerScores)
         {
-            player.isEliminated = true;
-            found = true;
-            Serial.printf("💀 %s marked as eliminated!\n", candidate.c_str());
-            break;
+            if (player.name == candidate)
+            {
+                player.isEliminated = true;
+                found = true;
+                Serial.printf("💀 %s marked as eliminated!\n", candidate.c_str());
+                break;
+            }
+        }
+
+        helper.sortPlayers();
+
+        if (!found)
+        {
+            Serial.printf("⚠️ Player '%s' not found!\n", candidate.c_str());
+            return;
+        }
+
+        display.showEliminatedPlayerScreen(candidate);
+        actuators.runIncorrectFeedbackAction();
+        delay(1500);
+
+        int activeCount = helper.getActivePlayerCount();
+        Serial.printf("📊 Active players remaining: %d\n", activeCount);
+
+        if (activeCount == 0)
+        {
+            Serial.println("🏁 All players eliminated! Game Over.");
+            display.showCompletionScreen();
+            config.displayState = SystemConfig::SHOW_COMPLETE;
+            return;
         }
     }
 
-    helper.sortPlayers();
-
-    if (!found)
-    {
-        Serial.printf("⚠️ Player '%s' not found!\n", candidate.c_str());
-        return;
-    }
-
-    // ---- Show elimination ----
-    display.showEliminatedPlayerScreen(candidate);
-    actuators.runIncorrectFeedbackAction();
-    delay(1500);
-
-    // ---- Continue or end ----
-    int activeCount = helper.getActivePlayerCount();
-    Serial.printf("📊 Active players remaining: %d\n", activeCount);
-
-    if (activeCount == 0)
-    {
-        Serial.println("🏁 All players eliminated! Game Over.");
-        display.showCompletionScreen();
-        config.displayState = SystemConfig::SHOW_COMPLETE;
-        return;
-    }
-
-    // ---- Set next player ----
+    // ---- Set next player (runs in BOTH saved and eliminated cases) ----
     helper.shufflePlayers();
     String nextPlayer = helper.getNextPlayer();
 
@@ -559,7 +613,7 @@ void GameMechanics::eliminatePlayer()
     }
 
     config.currentPlayerName = nextPlayer;
-    config.answered          = false;
+    config.answered = false;
     Serial.printf("🎮 Now playing: %s\n", config.currentPlayerName.c_str());
 
     // ---- Validate & show next question ----
@@ -593,10 +647,66 @@ void GameMechanics::eliminatePlayer()
 String GameMechanics::reviveByPeerEliminate()
 {
     // Reset selection state
-    config.revivingProcess     = false;
-    config.refuseToRevive      = false;
+    config.revivingProcess = false;
+    config.refuseToRevive = false;
     config.selectedSaviorIndex = 0;
+    config.saviorPlayerName = "";
 
+    // ==========================================
+    // DECIDE FLOW BY ACTIVE PLAYER COUNT
+    // ==========================================
+    const int activePlayers = helper.getActivePlayerCount();
+
+    // No one to save anyone — bail out.
+    // The caller should have caught this, but guard anyway.
+    if (activePlayers <= 1)
+    {
+        Serial.println("⚠️ reviveByPeerEliminate: <= 1 active player");
+        return "";
+    }
+
+    const bool lastChanceMode = (activePlayers == 2);
+
+    // ==========================================
+    // LAST-CHANCE MODE — 2 players left
+    // ==========================================
+    // No list, no Next. Just a direct prompt to the surviving player.
+    if (lastChanceMode)
+    {
+        Serial.println("🕹️ Last-chance mode (2 players left)");
+
+        display.showWouldYouSaveThePlayerScreen();
+
+        // Block until the surviving player chooses SAVE or REFUSE.
+        // The Inputs handler sets revivingProcess + one of the two
+        // decision flags, same as the normal savior flow.
+        while (!config.revivingProcess)
+        {
+            inputs.choicesButtonLastChance();
+            delay(50);
+        }
+
+        if (config.refuseToRevive)
+        {
+            Serial.println("🚫 Last-chance: player refused to save!");
+            return "";
+        }
+
+        // SAVE path — the surviving player is the savior
+        const String savior = config.saviorPlayerName;
+        if (savior.isEmpty() || !isValidSavior(savior))
+        {
+            Serial.println("⚠️ Last-chance: invalid savior");
+            return "";
+        }
+
+        Serial.printf("✅ Last-chance savior: %s\n", savior.c_str());
+        return savior;
+    }
+
+    // ==========================================
+    // NORMAL MODE — 3+ players, list of saviors
+    // ==========================================
     display.showListPossibleSaviorScreen();
 
     int lastIndex = -1;
@@ -630,8 +740,10 @@ String GameMechanics::reviveByPeerEliminate()
     }
 
     // Guards
-    if (name.isEmpty())                                return "";
-    if (!isValidSavior(name))                          return "";
+    if (name.isEmpty())
+        return "";
+    if (!isValidSavior(name))
+        return "";
 
     Serial.printf("✅ Player '%s' selected as savior\n", name.c_str());
     return name;
@@ -660,7 +772,8 @@ bool GameMechanics::canEliminate()
 {
     int activeCount = 0;
     for (const auto &player : config.playerScores)
-        if (!player.isEliminated) activeCount++;
+        if (!player.isEliminated)
+            activeCount++;
 
     return activeCount >= 2;
 }
@@ -701,8 +814,8 @@ void GameMechanics::endGameOnePlayer()
 SystemConfig::Question GameMechanics::getRandomQuestion()
 {
     SystemConfig::Question empty;
-    empty.id            = -1;
-    empty.text          = "No question available!";
+    empty.id = -1;
+    empty.text = "No question available!";
     empty.initialCharAns = 'A';
 
     if (config.questionList.empty())
@@ -725,7 +838,8 @@ String GameMechanics::getRandomOtherPlayer()
             others.push_back(p.name);
     }
 
-    if (others.empty()) return "";
+    if (others.empty())
+        return "";
 
     return others[random(0, others.size())];
 }

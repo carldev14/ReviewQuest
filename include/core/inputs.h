@@ -40,10 +40,11 @@ public:
     // ==========================================
     // TOUCH INPUTS
     // ==========================================
-    char choicesButtonProcessor();      // A/B/C/D from touch
-    void choicesButtonSavior();         // elect / next / skip
+    char choicesButtonProcessor(); // A/B/C/D from touch
+    void choicesButtonSavior();    // elect / next / skip
+    void choicesButtonLastChance();
     void advanceSaviorSelection();
-    int  confirmationSessionButton();   // 1 = yes, 2 = no, 0 = nothing
+    int confirmationSessionButton(); // 1 = yes, 2 = no, 0 = nothing
 
     // ==========================================
     // TOUCH CONFIG
@@ -59,25 +60,26 @@ private:
     // HELPERS
     // ==========================================
     char mapTouchToChoice(uint16_t x, uint16_t y);
-
+    String findPartnerName(const String &playerName);
+    
     // ==========================================
     // MEMBER VARIABLES
     // ==========================================
 
     // Physical button state
-    bool          lastStartButtonState = false;
-    int           clickCount           = 0;
-    bool          longPressHandled     = false;
+    bool lastStartButtonState = false;
+    int clickCount = 0;
+    bool longPressHandled = false;
     unsigned long buttonPressStartTime = 0;
     unsigned long lastClickReleaseTime = 0;
 
-    static constexpr unsigned long LONG_PRESS_DELAY   = 800;
+    static constexpr unsigned long LONG_PRESS_DELAY = 800;
     static constexpr unsigned long DOUBLE_CLICK_DELAY = 200;
-    static constexpr unsigned long debounceDelay      = 100;
+    static constexpr unsigned long debounceDelay = 100;
 
     // Touch state
-    bool          mirrorX_      = false;
-    bool          mirrorY_      = false;
+    bool mirrorX_ = false;
+    bool mirrorY_ = false;
     unsigned long lastTouchTime = 0;
 
     static constexpr unsigned long TOUCH_DEBOUNCE = 250;
@@ -86,10 +88,10 @@ private:
     static constexpr int START_INDEX = 4;
     unsigned long lastButtonPressTime[5] = {0, 0, 0, 0, 0};
 
-    Inputs()  = default;
+    Inputs() = default;
     ~Inputs() = default;
 
-    Inputs(const Inputs &)            = delete;
+    Inputs(const Inputs &) = delete;
     Inputs &operator=(const Inputs &) = delete;
 };
 

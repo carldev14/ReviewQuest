@@ -117,6 +117,10 @@ void handleSingleClick()
 
     case SystemConfig::SHOW_UPLOADED:
         Serial.println("Session uploaded... Start the session");
+        display.showListPlayers();
+        break;
+    case SystemConfig::SHOW_LIST_PLAYERS:
+        Serial.println("Show list of players");
         gameLogics.startQuiz();
         break;
 

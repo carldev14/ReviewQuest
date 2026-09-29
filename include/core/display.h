@@ -58,6 +58,7 @@ public:
     void showCompletionScreen();
     void showLeaderboardScreen();
     void showRestartGameScreen();
+    void showListPlayers();
 
     // ---- Events / feedback ----
     void showHintScreen(char removedOption);
@@ -69,6 +70,7 @@ public:
     void showNoneEliminatedScreen();
     void showNoQuestionsScreen();
     void showListPossibleSaviorScreen();
+    void showWouldYouSaveThePlayerScreen();
 
     // ---- Utility ----
     void showMessage(const String &title, const String &message, uint16_t color);
